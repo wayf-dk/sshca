@@ -1,0 +1,121 @@
+{{ define "html" }}
+<!DOCTYPE html>
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<base href="/" />
+<title>SSH Certificate Authority Demo</title>
+<style>
+body
+{
+	font-family: sans-serif;
+	font-size: 14pt;
+}
+
+p, ul { font-size: 100%; }
+li { margin: 10px 2em; }
+p, h3, h4, h5, details { margin: 5px 5px; padding: 0.1em; }
+td { padding: 0.2em 0.5em; }
+.hidden { display: none; }
+
+.cardx, .container, section
+{
+	/* Add shadows to create the "card" effect */
+	box-shadow: 0 4px 8px 0 rgba(0,0,0,0.2);
+	transition: 0.3s;
+	border-radius: 5px;
+	margin: 2%;
+	background-color: #F3F4F6;
+	/* #F1F5F9; */
+	padding: 5px;
+	border-left: 4px solid #66b340;
+}
+
+</style>
+</head>
+<body>
+{{ end }}
+
+
+{{ define "eohtml" }}
+</body>
+</html>
+{{ end }}
+
+{{ define "listCAs" }}
+{{template "html" }}
+<section class=ssh>
+<H2>SSH Certificate Authority Demo</h2>
+
+{{ $outer := . }}
+{{ range $key, $value := .config }}
+
+<p><a href="/{{ $outer.token }}/{{ $key }}">{{ $value.Name }}</a>
+
+{{ end }}
+</section>
+
+{{template "eohtml"}}
+{{ end }}
+
+
+{{ define "login" }}
+{{ template "html"}}
+<section class=ssh>
+<H2>SSH Certificate Authority Demo</h2>
+<p>The SSH Certificate Authority Demo creates SSH certificates based on a fake login.
+<p id=login><a href="/sso?state={{ .token }}">Login with a fake principal</a>
+</section>
+
+<section id=manual>
+<h2>SSH login</h2>
+<p>Copy the command below. Execute it in a shell to upload the public key and download the SSH certificate.
+<p><p id=curl></p>
+</section>
+
+<section id=auto class=hidden>
+<h2>Installed certificate</h2>
+<pre id=cert></pre>
+</section>
+
+<script>
+myAccessIDWindow = '{{ .verification_uri }}' && window.open('{{ .verification_uri }}', '_blank')
+
+setCurl()
+
+function setCurl() {
+    const t = '{{ .state }}'
+    const sshport = '{{ .sshport }}'
+
+    if (t) {
+        const host = window.location.hostname
+        const getCertCmd = `ssh -p ${sshport} ${window.location.hostname} token ${t}  > ~/.ssh/id_ed25519-cert.pub`
+        const curl = document.querySelector('#curl')
+        curl.innerText = getCertCmd
+
+		range = document.createRange()
+		range.selectNodeContents(curl)
+
+        sel = window.getSelection()
+		sel.removeAllRanges()
+		sel.addRange(range)
+
+        //navigator.clipboard.writeText(getCertCmd).then()
+        fetch(`/feedback/${t}`)
+            .then(response => response.text())
+            .then(data => document.querySelector('#cert').innerText = data)
+            .catch(xxx => { manual = true } )
+            .finally(() => {
+                //controller.timeout(1000)
+                document.querySelector('#manual').style.display = 'none'
+                document.querySelector('#login').style.display = 'none'
+                document.querySelector('#auto').style.display = 'block'
+            })
+    } else {
+        ['auto', 'manual'].forEach(e => document.querySelector(`#${e}`).style.display = 'none')
+    }
+    return false;
+}
+</script>
+{{template "eohtml"}}
+{{ end }}
