@@ -33,7 +33,9 @@ So clone the repo and:
 
 If you want to test starting the issuing of a certificate in a shell add the following function:
 
-`sshca () { ssh -p 2221 localhost ca -ca=demoCA | (read uri; open $uri;  >  ~/.ssh/id_ed25519-cert.pub) } `
+```shell
+sshca () { ssh -p 2221 localhost ca -ca=demoCA | (read uri; open $uri;  >  ~/.ssh/id_ed25519-cert.pub) }
+```
 
 You should replace the `open` with whatever opens an url on your platform. `open` works on a Mac.
 
