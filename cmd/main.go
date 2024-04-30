@@ -1,7 +1,6 @@
 package main
 
 import (
-    "fmt"
 	_ "embed"
 	"sshca"
 )
