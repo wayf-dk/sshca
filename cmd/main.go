@@ -16,10 +16,10 @@ func main() {
 
 	sshca.Config = sshca.Conf{
 		Template:                  tmpl,
-		Verification_uri_template: "http://localhost:2280/%s\n",
+		Verification_uri_template: "http://sshca.lan:2280/%s\n",
 		RendevouzTTL:              30,
-		SshListenOn:               "localhost:2221",
-		WebListenOn:               "localhost:2280",
+		SshListenOn:               "sshca.lan:2221",
+		WebListenOn:               "sshca.lan:2280",
 
 		CaConfigs: map[string]sshca.CaConfig{
 			"demoCA": {
@@ -36,9 +36,6 @@ func main() {
             },
 		},
 	}
-
-    fmt.Println("go to: http://localhost:2280")
-    fmt.Println("check cert: ssh -p 2222 demo@sshca.deic.dk demo")
 
 	sshca.Sshca()
 }
