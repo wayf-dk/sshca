@@ -79,11 +79,10 @@ var (
 		"ssh-ed25519":                      true,
 		"ssh-ed25519-cert-v01@openssh.com": true,
 	}
-	Config     Conf
-	tmpl       *template.Template
-	claims     = &rendezvous{info: map[string]certInfo{}}
-	publicKeys = &publicKeyMap{info: map[string]sessionInfo{}}
-	client     = &http.Client{Timeout: 2 * time.Second}
+	Config Conf
+	tmpl   *template.Template
+	claims = &rendezvous{info: map[string]certInfo{}}
+	client = &http.Client{Timeout: 2 * time.Second}
 )
 
 func Sshca() {
@@ -313,17 +312,19 @@ func sshserver() {
 			if !allowedKeyTypes[pubKey.Type()] {
 				return nil, errors.New("xxx")
 			}
-			_, ok := pubKey.(*ssh.Certificate)
-			if c.User() == "demo" && !ok {
-				return nil, errors.New("xxx")
+			permissions := &ssh.Permissions{
+				Extensions: map[string]string{
+					"pubkey": string(pubKey.Marshal()),
+					"user":   c.User(),
+				},
 			}
-			publicKeys.set(string(c.SessionID()), sessionInfo{c.User(), pubKey})
-			return nil, nil // errors.New("xxx")
+			if c.User() == "demo" {
+				if _, ok := pubKey.(*ssh.Certificate); !ok {
+					return nil, errors.New("xxx")
+				}
+			}
+			return permissions, nil
 		},
-	}
-
-	if Config.CaConfigs["transport"].Signer == nil {
-		log.Panic("Transport signer is nil")
 	}
 
 	sshConfig.AddHostKey(Config.CaConfigs["transport"].Signer)
@@ -586,29 +587,6 @@ func (rv *rendezvous) wait(token string) (xtra certInfo, err error) {
 	defer rv.mx.Unlock()
 	xtra, _ = rv.info[token]
 	delete(rv.info, token)
-	return
-}
-
-// pubkeys
-
-type (
-	publicKeyMap struct {
-		info map[string]sessionInfo
-		mx   sync.RWMutex
-	}
-)
-
-func (pk *publicKeyMap) set(k string, v sessionInfo) {
-	pk.mx.Lock()
-	defer pk.mx.Unlock()
-	pk.info[k] = v
-}
-
-func (pk *publicKeyMap) get(k string) (v sessionInfo) {
-	pk.mx.Lock()
-	defer pk.mx.Unlock()
-	v, _ = pk.info[k]
-	delete(pk.info, k)
 	return
 }
 
