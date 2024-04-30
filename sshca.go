@@ -360,6 +360,10 @@ func handleSSHConnection(nConn net.Conn, sshConfig *ssh.ServerConfig) {
 		return
 	}
 
+	xtras := conn.Permissions.Extensions
+	publicKey, _ := ssh.ParsePublicKey([]byte(xtras["pubkey"]))
+	user := xtras["user"]
+
 	// The incoming Request channel must be serviced.
 	go ssh.DiscardRequests(reqs)
 
