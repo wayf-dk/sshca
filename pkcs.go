@@ -56,22 +56,22 @@ func InitPKCS11(pin string) {
 		if e != nil {
 			log.Fatalf("Failed to open session: %s\n", e.Error())
 		}
-fmt.Println("session", session, e)
+        fmt.Println("session", session, e)
 		e = p.Login(session, pkcs11.CKU_USER, pin)
 		if e != nil {
 			log.Printf("Failed to login to session: %s\n", e.Error())
 		}
-fmt.Println("login",sessions,  e)
+        fmt.Println("login",sessions,  e)
 		sessions <- session
 	}
 	fmt.Println("pkcs11.end of init")
 
 }
 
-func findPrivatekey(label string) pkcs11.ObjectHandle {
+func findPrivatekey(label string) (pkcs11.ObjectHandle, bool) {
     if len(sessions) == 0 {
         log.Println("no HSM sessions available - HSM keys can't be used")
-        return 0
+        return 0, false
     }
 	session := <-sessions
 	defer func() { sessions <- session }()
@@ -89,7 +89,7 @@ func findPrivatekey(label string) pkcs11.ObjectHandle {
 	if len(objs) != 1 {
 		log.Panicf("did not find one (and only one) key with label '%s'", label)
 	}
-	return objs[0]
+	return objs[0], true
 }
 
 func (signer hsmSigner) Sign(rand io.Reader, digest []byte) (signature *ssh.Signature, err error) {
