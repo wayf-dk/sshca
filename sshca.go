@@ -1,7 +1,7 @@
 package sshca
 
 import (
-    "cmp"
+	"cmp"
 	"crypto/ed25519"
 	"crypto/rand"
 	"embed"
@@ -46,12 +46,12 @@ type (
 	}
 
 	Settings struct {
-	    Ttl int64
+		Ttl int64
 	}
 
 	CaConfig struct {
-	    Fake                     bool
-		Id, Name, PublicKey     string
+		Fake                     bool
+		Id, Name, PublicKey      string
 		ClientID, ConfigEndpoint string
 		Settings                 Settings
 		Op                       Opconfig   `json:"-"`
@@ -93,17 +93,6 @@ func Sshca() {
 	prepareCAs()
 	go sshserver()
 
-	/*
-	   /
-	   /<ca>
-	   /<ca>/www/<what>
-	   /<ca>/<path>
-	   /<token>
-	   /www/...
-	   /feedback/<token>
-	   /sso
-	*/
-
 	http.Handle("/favicon.ico", http.NotFoundHandler())
 	http.Handle("/", appHandler(sshcaRouter))
 
@@ -126,43 +115,42 @@ func sshcaRouter(w http.ResponseWriter, r *http.Request) (err error) {
 		return ssoHandler(w, r)
 	default:
 		p2 := path[2]
-	    var token string
-	    var ci certInfo
-	    var tkOK bool
-	    config, caOK := Config.CaConfigs[p]
-	    if !caOK {
-	        config, caOK = Config.CaConfigs[p2]
-	        ci, token, tkOK = claims.get(p)
-	    }
-	    if !tkOK {
-	        ci, token, tkOK = claims.get(p2)
-	    }
-	    if !caOK && tkOK {
-	        config, caOK = Config.CaConfigs[ci.ca]
-	    }
-        if token == "" {
-            token = claims.put(ci) //
-        }
+		var token string
+		var ci certInfo
+		var tkOK bool
+		config, caOK := Config.CaConfigs[p]
+		if !caOK {
+			config, caOK = Config.CaConfigs[p2]
+			ci, token, tkOK = claims.get(p)
+		}
+		if !tkOK {
+			ci, token, tkOK = claims.get(p2)
+		}
+		if !caOK && tkOK {
+			config, caOK = Config.CaConfigs[ci.ca]
+		}
+		if token == "" {
+			token = claims.put(ci) //
+		}
 
-        if caOK { // handle /<ca>/.*
-            switch p2 {
-            case "config":
-                jsonTxt, _ := json.MarshalIndent(config, "", "    ")
-                w.Header().Add("Content-Type", "application/json")
-                w.Write(jsonTxt)
-                return
-            case "sign":
-                return sshsignHandler(w, r)
-            default: // we assume we have a valid token
-            }
-            ci.ca = config.Id
-            claims.upd(token, ci)
+		if caOK { // handle /<ca>/.*
+			switch p2 {
+			case "config":
+				jsonTxt, _ := json.MarshalIndent(config, "", "    ")
+				w.Header().Add("Content-Type", "application/json")
+				w.Write(jsonTxt)
+				return
+			case "sign":
+				return sshsignHandler(w, r)
+			default: // we assume we have a valid token
+			}
+			ci.ca = config.Id
+			claims.upd(token, ci)
 			return tokenHandler(w, r, token, ci, config)
-        }
-        err = tmpl.ExecuteTemplate(w, "listCAs", map[string]any{"config": Config.CaConfigs, "token": token} )
-        return
+		}
+		err = tmpl.ExecuteTemplate(w, "listCAs", map[string]any{"config": Config.CaConfigs, "token": token})
+		return
 	}
-	return
 }
 
 func prepareCAs() {
@@ -176,15 +164,20 @@ func prepareCAs() {
 		if v.Signer == nil {
 			pubkey, _, _, _, _ := ssh.ParseAuthorizedKey([]byte(v.PublicKey))
 			privkeyLabel := base64.RawURLEncoding.EncodeToString(pubkey.(ssh.CryptoPublicKey).CryptoPublicKey().(ed25519.PublicKey)[:])
-			v.Signer = hsmSigner{
-				priv: findPrivatekey(privkeyLabel),
-				pub:  pubkey,
+			if priv, ok := findPrivatekey(privkeyLabel); ok {
+				v.Signer = hsmSigner{
+					priv: priv,
+					pub:  pubkey,
+				}
 			}
 		}
-	    v.Id = i
+		v.Id = i
 		Config.CaConfigs[i] = v
 	}
-	// PP(Config)
+
+	if Config.CaConfigs["transport"].Signer == nil {
+		log.Panic("Transport signer is nil")
+	}
 }
 
 func (fn appHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -220,42 +213,41 @@ func (fn appHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func ssoHandler(w http.ResponseWriter, r *http.Request) (err error) {
-    r.ParseForm()
-    token := r.Form.Get("state") // when returning
-    if ci, _, ok := claims.get(token); ok {   // see if it is a token
-        principal := r.Header.Get(Config.Principal)
-        if Config.CaConfigs[ci.ca].Fake {
-            principal = "a_really_fake_principal"
-        }
-        if principal != "" {
-            attrs := map[string]any{"eduPersonPrincipalName": principal}
-            claims.meet(token, certInfo{claims: attrs})
-            claims.set(token+"_feedback", certInfo{})
-            err = tmpl.ExecuteTemplate(w, "login", map[string]any{"ca": ci.ca, "state": token, "sshport": Config.SshPort})
-        }
-    }
-    return
+	r.ParseForm()
+	if ci, token, ok := claims.get(r.Form.Get("state")); ok { // see if it is a token
+		principal := r.Header.Get(Config.Principal)
+		if Config.CaConfigs[ci.ca].Fake {
+			principal = "a_really_fake_principal"
+		}
+		if principal != "" {
+			attrs := map[string]any{"eduPersonPrincipalName": principal}
+			claims.meet(token, certInfo{claims: attrs})
+			claims.set(token+"_feedback", certInfo{})
+			err = tmpl.ExecuteTemplate(w, "login", map[string]any{"ca": ci.ca, "state": token, "sshport": Config.SshPort})
+		}
+	}
+	return
 }
 
-func tokenHandler(w http.ResponseWriter, r *http.Request, token string, ci certInfo, config CaConfig ) (err error) {
+func tokenHandler(w http.ResponseWriter, r *http.Request, token string, ci certInfo, config CaConfig) (err error) {
 	r.ParseForm()
-    ca, idp := config.Id, cmp.Or(ci.idp, r.Form.Get("idpentityid"))
-    if config.ClientID != "" {
-        err = deviceflowHandler(w, config, token)
-        return
-    } else if idp == "" {
-        err = tmpl.ExecuteTemplate(w, "login", map[string]string{"token": token, "ca": ca, "sshport": Config.SshPort})
-        return
-    } else {
-        if config.Fake {
-            return
-        }
-        data := url.Values{}
-        data.Set("state", token)
-        data.Set("idpentityid", idp)
-        http.Redirect(w, r, "/sso?"+data.Encode(), http.StatusFound)
-        return
-    }
+	ca, idp := config.Id, cmp.Or(ci.idp, r.Form.Get("idpentityid"))
+	if config.ClientID != "" {
+		err = deviceflowHandler(w, config, token)
+		return
+	} else if idp == "" {
+		err = tmpl.ExecuteTemplate(w, "login", map[string]string{"token": token, "ca": ca, "sshport": Config.SshPort})
+		return
+	} else {
+		if config.Fake {
+			return
+		}
+		data := url.Values{}
+		data.Set("state", token)
+		data.Set("idpentityid", idp)
+		http.Redirect(w, r, "/sso?"+data.Encode(), http.StatusFound)
+		return
+	}
 	return
 }
 
@@ -381,23 +373,19 @@ func handleSSHConnection(nConn net.Conn, sshConfig *ssh.ServerConfig) {
 		for req := range reqs {
 			switch req.Type {
 			case "exec":
-				si := publicKeys.get(string(conn.SessionID()))
 				args := strings.Split(string(req.Payload[4:])+"  ", " ") // always at least 2 elements
 				cmd, token := args[0], args[1]
 				f1 := flag.NewFlagSet("", flag.ExitOnError)
-                ca := f1.String("ca", "", "")
-                idp := f1.String("idp", "", "")
-                f1.Parse(args[1:])
+				ca := f1.String("ca", "", "")
+				idp := f1.String("idp", "", "")
+				f1.Parse(args[1:])
 				switch cmd {
-				case "token":
+				case "token": // just fall thru
 				case "ca":
 					token = claims.put(certInfo{ca: *ca, idp: *idp})
 					io.WriteString(channel, fmt.Sprintf(Config.Verification_uri_template, token))
 				case "demo":
-					if cert, ok := si.publicKey.(*ssh.Certificate); ok {
-						channel.Write(certPP(cert))
-						io.WriteString(channel, "\n")
-					}
+					demoCert(channel, publicKey)
 					channel.Close()
 					return
 				default:
@@ -405,8 +393,8 @@ func handleSSHConnection(nConn net.Conn, sshConfig *ssh.ServerConfig) {
 					continue
 				}
 				xtra, err := claims.wait(token)
-				if si.user != "" && err == nil {
-					cert, err := newCertificate(Config.CaConfigs[xtra.ca], si.publicKey, xtra.claims)
+				if user != "" && err == nil {
+					cert, err := newCertificate(Config.CaConfigs[xtra.ca], publicKey, xtra.claims)
 					if err == nil {
 						certTxt := ssh.MarshalAuthorizedKey(cert)
 						// keyName := si.publicKey.Type()[4:]
@@ -484,7 +472,7 @@ func newCertificate(ca CaConfig, pubkey ssh.PublicKey, claims map[string]any) (c
 		Key:      pubkey,
 		Permissions: ssh.Permissions{
 			CriticalOptions: map[string]string{}, // "force-command": "id ; pwd ; /usr/bin/ls -a"},
-			Extensions:      map[string]string{"permit-agent-forwarding": "", "permit-pty": ""},
+			Extensions:      map[string]string{"permit-agent-forwarding": "", "permit-pty": "", "CA": ca.Id},
 			// Extensions:      map[string]string{"permit-agent-forwarding": "", "permit-pty": "", "groups@wayf.dk": data},
 		},
 		KeyId:           principal,
@@ -496,17 +484,16 @@ func newCertificate(ca CaConfig, pubkey ssh.PublicKey, claims map[string]any) (c
 	return
 }
 
-func certPP(cert *ssh.Certificate) ([]byte) {
-    const iso = "2006-01-02T15:04:05"
-    va := time.Unix(int64(cert.ValidAfter), 0).Format(iso)
-    vb := time.Unix(int64(cert.ValidBefore), 0).Format(iso)
-    //hours := rec.cert.ValidBefore - cert.ValidAfter
-    pp, _ := json.MarshalIndent(cert, "", "    ")
-    pp = regexp.MustCompile(`("ValidAfter": )(\d+),`).ReplaceAll(pp, []byte(`${1}`+va+`,`))
-    pp = regexp.MustCompile(`("ValidBefore": )(\d+),`).ReplaceAll(pp, []byte(`${1}`+vb+`,`))
-    return pp
+func certPP(cert *ssh.Certificate) []byte {
+	const iso = "2006-01-02T15:04:05"
+	va := time.Unix(int64(cert.ValidAfter), 0).Format(iso)
+	vb := time.Unix(int64(cert.ValidBefore), 0).Format(iso)
+	//hours := rec.cert.ValidBefore - cert.ValidAfter
+	pp, _ := json.MarshalIndent(cert, "", "    ")
+	pp = regexp.MustCompile(`("ValidAfter": )(\d+),`).ReplaceAll(pp, []byte(`${1}`+va+`,`))
+	pp = regexp.MustCompile(`("ValidBefore": )(\d+),`).ReplaceAll(pp, []byte(`${1}`+vb+`,`))
+	return pp
 }
-
 
 // nonce
 func nonce() (s string) {
@@ -515,7 +502,7 @@ func nonce() (s string) {
 	if err != nil {
 		log.Panic("Problem with making random number:", err)
 	}
-	b[0] = b[0] & byte(0x7f) // make sure it is a positive 64 bit number
+	b[0] = b[0] & byte(0x7f) // make sure it is a positive number
 	return hex.EncodeToString(b)
 }
 
@@ -572,11 +559,11 @@ func (rv *rendezvous) cleanUp() {
 func (rv *rendezvous) upd(token string, xtra certInfo) {
 	rv.mx.Lock()
 	defer rv.mx.Unlock()
-    old, _ := rv.info[token]
-    xtra.ch = old.ch
-    xtra.created = old.created
-    rv.info[token] = xtra
-    return
+	old, _ := rv.info[token]
+	xtra.ch = old.ch
+	xtra.created = old.created
+	rv.info[token] = xtra
+	return
 }
 
 func (rv *rendezvous) set(token string, xtra certInfo) {
@@ -599,8 +586,8 @@ func (rv *rendezvous) get(token string) (xtra certInfo, tk string, ok bool) {
 	defer rv.mx.RUnlock()
 	xtra, ok = rv.info[token]
 	if ok {
-    	tk = token
-    }
+		tk = token
+	}
 	return
 }
 
@@ -653,7 +640,7 @@ func GetSignerFromSshAgent() (pubkey string, signer ssh.Signer) {
 	}
 	for _, s := range signers {
 		if allowedKeyTypes[s.PublicKey().Type()] {
-			pubkey = string(ssh.MarshalAuthorizedKey(s.PublicKey()))
+			pubkey = strings.TrimRight(string(ssh.MarshalAuthorizedKey(s.PublicKey())), "\n")
 			signer = s
 			return
 		}
