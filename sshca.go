@@ -62,7 +62,7 @@ type (
 		WWW                       embed.FS
 		Template                  string
 		Verification_uri_template string
-		RendevouzTTL              time.Duration
+		RendevousTTL              time.Duration
 		SshPort                   string
 		SshListenOn               string
 		WebListenOn               string
@@ -87,7 +87,7 @@ var (
 
 func Sshca() {
 	tmpl = template.Must(template.New("ca.template").Parse(Config.Template))
-	claims.ttl = Config.RendevouzTTL * time.Second
+	claims.ttl = Config.RendevousTTL * time.Second
 	Config.SshPort = Config.SshListenOn[strings.Index(Config.SshListenOn, ":")+1:]
 	claims.cleanUp()
 	prepareCAs()

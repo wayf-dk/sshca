@@ -16,7 +16,7 @@ func main() {
 	sshca.Config = sshca.Conf{
 		Template:                  tmpl,
 		Verification_uri_template: "http://localhost:2280/%s\n",
-		RendevouzTTL:              30,
+		RendevousTTL:              30,
 		SshListenOn:               "localhost:2221",
 		WebListenOn:               "localhost:2280",
 
