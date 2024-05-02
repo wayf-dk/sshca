@@ -431,26 +431,26 @@ func demoCert(channel ssh.Channel, publicKey ssh.PublicKey) {
 			fmt.Fprintln(channel, "Certificate is not signed by this service")
 		} else {
 			fmt.Fprintf(channel, `Certificate is signed by the "%s" CA%s`, ca, "\n")
-
-			// from ssh.certs.go CheckCert
-			unixNow := time.Now().Unix()
-			if after := int64(cert.ValidAfter); after < 0 || unixNow < int64(cert.ValidAfter) {
-				fmt.Fprintln(channel, `Certificate is not yet valid`)
-			}
-			if before := int64(cert.ValidBefore); cert.ValidBefore != uint64(ssh.CertTimeInfinity) && (unixNow >= before || before < 0) {
-				fmt.Fprintln(channel, `Certificate has expired`)
-			}
-			// from ssh.certs.go - bytesForSigning
-			c2 := *cert
-			c2.Signature = nil
-			out := c2.Marshal()
-			// Drop trailing signature length.
-			bytesForSigning := out[:len(out)-4]
-
-			if err := cert.SignatureKey.Verify(bytesForSigning, cert.Signature); err != nil {
-				fmt.Fprintln(channel, "Certificate signature does not verify")
-			}
 		}
+
+        // from ssh.certs.go CheckCert
+        unixNow := time.Now().Unix()
+        if after := int64(cert.ValidAfter); after < 0 || unixNow < int64(cert.ValidAfter) {
+            fmt.Fprintln(channel, `Certificate is not yet valid`)
+        }
+        if before := int64(cert.ValidBefore); cert.ValidBefore != uint64(ssh.CertTimeInfinity) && (unixNow >= before || before < 0) {
+            fmt.Fprintln(channel, `Certificate has expired`)
+        }
+        // from ssh.certs.go - bytesForSigning
+        c2 := *cert
+        c2.Signature = nil
+        out := c2.Marshal()
+        // Drop trailing signature length.
+        bytesForSigning := out[:len(out)-4]
+
+        if err := cert.SignatureKey.Verify(bytesForSigning, cert.Signature); err != nil {
+            fmt.Fprintln(channel, "Certificate signature does not verify")
+        }
 	}
 }
 
