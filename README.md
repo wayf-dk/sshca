@@ -60,10 +60,4 @@ Then run: `sshca` and then click "Login with a fake principal" in the browser.
 
 The sshca function is supposed to download the certificate and the browser to show a dump of the certificate as feedback.
 
-Then run: `ssh -ssh -p 2221 demo@localhost demo` to se a dump of the certificate your ssh client would use if you tried to log in to a ssh server that required a ed25519 SSH certificate.
-
- 
-
-
- 
-
+Then run: `ssh -p 2221 demo@localhost demo` to se a dump of the certificate your ssh client would use if you tried to log in to a ssh server that required a ed25519 SSH certificate.
