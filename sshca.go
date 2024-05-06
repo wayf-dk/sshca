@@ -630,13 +630,12 @@ func GetSignerFromSshAgent() (pubkey string, signer ssh.Signer) {
 	socket := os.Getenv("SSH_AUTH_SOCK")
 	conn, err := net.Dial("unix", socket)
 	if err != nil {
-		return
-		//		log.Fatalf("Failed to open SSH_AUTH_SOCK: %v", err)
+		log.Fatalf("Failed to open SSH_AUTH_SOCK: %v", err)
 	}
 	agent := agent.NewClient(conn)
 	signers, err := agent.Signers()
 	if err != nil {
-		log.Panicf("RequestIdentities: %v", err)
+		log.Panicf("Getting signers from ssh-agent failed: %v", err)
 	}
 	for _, s := range signers {
 		if allowedKeyTypes[s.PublicKey().Type()] {
@@ -645,5 +644,6 @@ func GetSignerFromSshAgent() (pubkey string, signer ssh.Signer) {
 			return
 		}
 	}
+	log.Fatalln("No ed25519 keys available in ssh-agent")
 	return
 }
