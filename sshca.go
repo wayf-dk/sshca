@@ -240,7 +240,7 @@ func ssoHandler(w http.ResponseWriter, r *http.Request) (err error) {
 			attrs := map[string]any{"eduPersonPrincipalName": principal}
 			claims.meet(token, certInfo{claims: attrs})
 			claims.set(token+"_feedback", certInfo{})
-			err = tmpl.ExecuteTemplate(w, "login", map[string]any{"ca": ci.ca, "state": token, "sshport": Config.SshPort, "ri": "https://sshca.lan/ri?ca="+ci.ca})
+			err = tmpl.ExecuteTemplate(w, "login", map[string]any{"ca": ci.ca, "state": token, "sshport": Config.SshPort, "ri": "/ri?ca="+ci.ca})
 		}
 	}
 	return
@@ -253,7 +253,7 @@ func tokenHandler(w http.ResponseWriter, r *http.Request, token string, ci certI
 		err = deviceflowHandler(w, config, token)
 		return
 	} else if idp == "" {
-		err = tmpl.ExecuteTemplate(w, "login", map[string]string{"token": token, "ca": ca, "sshport": Config.SshPort, "ri": "https://sshca.lan/ri?ca="+ca+"&state="+token})
+		err = tmpl.ExecuteTemplate(w, "login", map[string]string{"token": token, "ca": ca, "sshport": Config.SshPort, "ri": "/ri?ca="+ca+"&state="+token})
 		return
 	} else {
 		if config.Fake {
