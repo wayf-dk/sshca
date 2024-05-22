@@ -83,10 +83,13 @@ var (
 	tmpl   *template.Template
 	claims = &rendezvous{info: map[string]certInfo{}}
 	client = &http.Client{Timeout: 2 * time.Second}
+	funcMap = template.FuncMap{
+    	"PathEscape": url.PathEscape,
+    }
 )
 
 func Sshca() {
-	tmpl = template.Must(template.New("ca.template").Parse(Config.Template))
+	tmpl = template.Must(template.New("ca.template").Funcs(funcMap).Parse(Config.Template))
 	claims.ttl = Config.RendevousTTL * time.Second
 	Config.SshPort = Config.SshListenOn[strings.Index(Config.SshListenOn, ":")+1:]
 	claims.cleanUp()
