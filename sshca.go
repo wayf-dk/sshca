@@ -50,7 +50,7 @@ type (
 	}
 
 	CaConfig struct {
-		Fake                     bool
+		Fake, Hide               bool
 		Id, Name, PublicKey      string
 		ClientID, ConfigEndpoint string
 		Settings                 Settings
