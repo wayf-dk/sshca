@@ -114,6 +114,8 @@ func sshcaRouter(w http.ResponseWriter, r *http.Request) (err error) {
 		return
 	case "feedback":
 		return feedbackHandler(w, r)
+	case "ri": // returning from mindthegap
+		return riHandler(w, r)
 	case "sso": // returning from login
 		return ssoHandler(w, r)
 	default:
@@ -215,6 +217,18 @@ func (fn appHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	log.Printf("%s %s %s %+v %1.3f %d %s", remoteAddr, r.Method, r.Host, r.URL, time.Since(starttime).Seconds(), status, err)
 }
 
+func riHandler(w http.ResponseWriter, r *http.Request) (err error) {
+	_, token, ok := claims.get(r.Form.Get("state")) // valid token
+    if !ok {
+		token = claims.put(certInfo{ca: r.Form.Get("ca")})
+	}
+    data := url.Values{}
+    data.Set("state", token)
+    data.Set("idpentityid", r.Form.Get("idpentityid"))
+    http.Redirect(w, r, "/sso?"+data.Encode(), http.StatusFound)
+    return
+}
+
 func ssoHandler(w http.ResponseWriter, r *http.Request) (err error) {
 	r.ParseForm()
 	if ci, token, ok := claims.get(r.Form.Get("state")); ok { // see if it is a token
@@ -226,7 +240,7 @@ func ssoHandler(w http.ResponseWriter, r *http.Request) (err error) {
 			attrs := map[string]any{"eduPersonPrincipalName": principal}
 			claims.meet(token, certInfo{claims: attrs})
 			claims.set(token+"_feedback", certInfo{})
-			err = tmpl.ExecuteTemplate(w, "login", map[string]any{"ca": ci.ca, "state": token, "sshport": Config.SshPort})
+			err = tmpl.ExecuteTemplate(w, "login", map[string]any{"ca": ci.ca, "state": token, "sshport": Config.SshPort, "ri": "https://sshca.lan/ri?ca="+ci.ca})
 		}
 	}
 	return
@@ -239,7 +253,7 @@ func tokenHandler(w http.ResponseWriter, r *http.Request, token string, ci certI
 		err = deviceflowHandler(w, config, token)
 		return
 	} else if idp == "" {
-		err = tmpl.ExecuteTemplate(w, "login", map[string]string{"token": token, "ca": ca, "sshport": Config.SshPort})
+		err = tmpl.ExecuteTemplate(w, "login", map[string]string{"token": token, "ca": ca, "sshport": Config.SshPort, "ri": "https://sshca.lan/ri?ca="+ca+"&state="+token})
 		return
 	} else {
 		if config.Fake {
