@@ -224,7 +224,7 @@ func riHandler(w http.ResponseWriter, r *http.Request) (err error) {
 	}
     data := url.Values{}
     data.Set("state", token)
-    data.Set("idpentityid", r.Form.Get("idpentityid"))
+    data.Set("idpentityid", r.Form.Get("entityID"))
     http.Redirect(w, r, "/sso?"+data.Encode(), http.StatusFound)
     return
 }
