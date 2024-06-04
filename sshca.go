@@ -489,7 +489,7 @@ func newCertificate(ca CaConfig, pubkey ssh.PublicKey, claims map[string]any) (c
 		Key:      pubkey,
 		Permissions: ssh.Permissions{
 			CriticalOptions: map[string]string{}, // "force-command": "id ; pwd ; /usr/bin/ls -a"},
-			Extensions:      map[string]string{"permit-agent-forwarding": "", "permit-pty": "", "CA": ca.Id},
+			Extensions:      map[string]string{"permit-agent-forwarding": "", "permit-pty": ""},
 			// Extensions:      map[string]string{"permit-agent-forwarding": "", "permit-pty": "", "groups@wayf.dk": data},
 		},
 		KeyId:           principal,
