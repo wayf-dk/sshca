@@ -79,13 +79,13 @@ var (
 		"ssh-ed25519":                      true,
 		"ssh-ed25519-cert-v01@openssh.com": true,
 	}
-	Config Conf
-	tmpl   *template.Template
-	claims = &rendezvous{info: map[string]certInfo{}}
-	client = &http.Client{Timeout: 2 * time.Second}
+	Config  Conf
+	tmpl    *template.Template
+	claims  = &rendezvous{info: map[string]certInfo{}}
+	client  = &http.Client{Timeout: 2 * time.Second}
 	funcMap = template.FuncMap{
-    	"PathEscape": url.PathEscape,
-    }
+		"PathEscape": url.PathEscape,
+	}
 )
 
 func Sshca() {
@@ -219,14 +219,14 @@ func (fn appHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func riHandler(w http.ResponseWriter, r *http.Request) (err error) {
 	_, token, ok := claims.get(r.Form.Get("state")) // valid token
-    if !ok {
+	if !ok {
 		token = claims.put(certInfo{ca: r.Form.Get("ca")})
 	}
-    data := url.Values{}
-    data.Set("state", token)
-    data.Set("idpentityid", r.Form.Get("entityID"))
-    http.Redirect(w, r, "/sso?"+data.Encode(), http.StatusFound)
-    return
+	data := url.Values{}
+	data.Set("state", token)
+	data.Set("idpentityid", r.Form.Get("entityID"))
+	http.Redirect(w, r, "/sso?"+data.Encode(), http.StatusFound)
+	return
 }
 
 func ssoHandler(w http.ResponseWriter, r *http.Request) (err error) {
@@ -240,7 +240,7 @@ func ssoHandler(w http.ResponseWriter, r *http.Request) (err error) {
 			attrs := map[string]any{"eduPersonPrincipalName": principal}
 			claims.meet(token, certInfo{claims: attrs})
 			claims.set(token+"_feedback", certInfo{})
-			err = tmpl.ExecuteTemplate(w, "login", map[string]any{"ca": ci.ca, "state": token, "sshport": Config.SshPort, "ri": "/ri?ca="+ci.ca})
+			err = tmpl.ExecuteTemplate(w, "login", map[string]any{"ca": ci.ca, "state": token, "sshport": Config.SshPort, "ri": "/ri?ca=" + ci.ca})
 		}
 	}
 	return
@@ -253,7 +253,7 @@ func tokenHandler(w http.ResponseWriter, r *http.Request, token string, ci certI
 		err = deviceflowHandler(w, config, token)
 		return
 	} else if idp == "" {
-		err = tmpl.ExecuteTemplate(w, "login", map[string]string{"token": token, "ca": ca, "sshport": Config.SshPort, "ri": "/ri?ca="+ca+"&state="+token})
+		err = tmpl.ExecuteTemplate(w, "login", map[string]string{"token": token, "ca": ca, "sshport": Config.SshPort, "ri": "/ri?ca=" + ca + "&state=" + token})
 		return
 	} else {
 		if config.Fake {
@@ -449,24 +449,24 @@ func demoCert(channel ssh.Channel, publicKey ssh.PublicKey) {
 			fmt.Fprintf(channel, `Certificate is signed by the "%s" CA%s`, ca, "\n")
 		}
 
-        // from ssh.certs.go CheckCert
-        unixNow := time.Now().Unix()
-        if after := int64(cert.ValidAfter); after < 0 || unixNow < int64(cert.ValidAfter) {
-            fmt.Fprintln(channel, `Certificate is not yet valid`)
-        }
-        if before := int64(cert.ValidBefore); cert.ValidBefore != uint64(ssh.CertTimeInfinity) && (unixNow >= before || before < 0) {
-            fmt.Fprintln(channel, `Certificate has expired`)
-        }
-        // from ssh.certs.go - bytesForSigning
-        c2 := *cert
-        c2.Signature = nil
-        out := c2.Marshal()
-        // Drop trailing signature length.
-        bytesForSigning := out[:len(out)-4]
+		// from ssh.certs.go CheckCert
+		unixNow := time.Now().Unix()
+		if after := int64(cert.ValidAfter); after < 0 || unixNow < int64(cert.ValidAfter) {
+			fmt.Fprintln(channel, `Certificate is not yet valid`)
+		}
+		if before := int64(cert.ValidBefore); cert.ValidBefore != uint64(ssh.CertTimeInfinity) && (unixNow >= before || before < 0) {
+			fmt.Fprintln(channel, `Certificate has expired`)
+		}
+		// from ssh.certs.go - bytesForSigning
+		c2 := *cert
+		c2.Signature = nil
+		out := c2.Marshal()
+		// Drop trailing signature length.
+		bytesForSigning := out[:len(out)-4]
 
-        if err := cert.SignatureKey.Verify(bytesForSigning, cert.Signature); err != nil {
-            fmt.Fprintln(channel, "Certificate signature does not verify")
-        }
+		if err := cert.SignatureKey.Verify(bytesForSigning, cert.Signature); err != nil {
+			fmt.Fprintln(channel, "Certificate signature does not verify")
+		}
 	}
 }
 
@@ -540,12 +540,13 @@ func PP(i ...interface{}) {
 
 type (
 	certInfo struct {
-		ch      chan bool
-		created time.Time
-		ca, idp string
-		claims  map[string]any
-		cert    *ssh.Certificate
-		err     error
+		ch        chan bool
+		created   time.Time
+		ca, idp   string
+		claims    map[string]any
+		cert      *ssh.Certificate
+		waitedFor bool
+		err       error
 	}
 
 	rendezvous struct {
@@ -621,13 +622,16 @@ func (rv *rendezvous) meet(token string, info certInfo) {
 }
 
 func (rv *rendezvous) wait(token string) (xtra certInfo, err error) {
-	rv.mx.RLock()
+	rv.mx.Lock()
 	xtra, ok := rv.info[token]
-	rv.mx.RUnlock()
-	if !ok {
-		err = errors.New("no userinfo")
+	if !ok || xtra.waitedFor {
+    	rv.mx.Unlock()
+		err = errors.New("invalid token")
 		return
 	}
+	xtra.waitedFor = true
+	rv.info[token] = xtra
+    rv.mx.Unlock()
 	select {
 	case <-xtra.ch:
 	case <-time.After(rv.ttl):
