@@ -392,14 +392,14 @@ func handleSSHConnection(nConn net.Conn, sshConfig *ssh.ServerConfig) {
 				args := strings.Split(string(req.Payload[4:])+"  ", " ") // always at least 2 elements
 				cmd, token := args[0], args[1]
 				f1 := flag.NewFlagSet("", flag.ExitOnError)
-				ca := f1.String("ca", "", "")
-				idp := f1.String("idp", "", "")
+//				ca := f1.String("ca", "", "")
+//				idp := f1.String("idp", "", "")
 				f1.Parse(args[1:])
 				switch cmd {
 				case "token": // just fall thru
-				case "ca":
-					token = claims.put(certInfo{ca: *ca, idp: *idp})
-					io.WriteString(channel, fmt.Sprintf(Config.Verification_uri_template, token))
+//				case "ca":
+//					token = claims.put(certInfo{ca: *ca, idp: *idp})
+//					io.WriteString(channel, fmt.Sprintf(Config.Verification_uri_template, token))
 				case "demo":
 					demoCert(channel, publicKey)
 					channel.Close()
