@@ -265,7 +265,6 @@ func tokenHandler(w http.ResponseWriter, r *http.Request, token string, ci certI
 		http.Redirect(w, r, "/sso?"+data.Encode(), http.StatusFound)
 		return
 	}
-	return
 }
 
 func feedbackHandler(w http.ResponseWriter, r *http.Request) (err error) {
