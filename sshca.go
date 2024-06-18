@@ -429,7 +429,7 @@ func handleSSHConnection(nConn net.Conn, sshConfig *ssh.ServerConfig) {
 
 func demoCert(channel ssh.Channel, publicKey ssh.PublicKey) {
 	if cert, ok := publicKey.(*ssh.Certificate); ok {
-		channel.Write(certPP(cert))
+		channel.Write(certPP(cert, ""))
 		io.WriteString(channel, "\n")
 		signatureKey := strings.TrimRight(string(ssh.MarshalAuthorizedKey(cert.SignatureKey)), "\n")
 		signedByUs := false
@@ -500,12 +500,13 @@ func newCertificate(ca CaConfig, pubkey ssh.PublicKey, claims map[string]any) (c
 	return
 }
 
-func certPP(cert *ssh.Certificate) []byte {
+func certPP(cert *ssh.Certificate, prefix string) (pp []byte) {
 	const iso = "2006-01-02T15:04:05"
 	va := time.Unix(int64(cert.ValidAfter), 0).Format(iso)
 	vb := time.Unix(int64(cert.ValidBefore), 0).Format(iso)
 	//hours := rec.cert.ValidBefore - cert.ValidAfter
-	pp, _ := json.MarshalIndent(cert, "", "    ")
+	pp, _ = json.MarshalIndent(cert, prefix, "    ")
+	pp = append([]byte(prefix), pp...) // no prefix on 1st line ???
 	pp = regexp.MustCompile(`("ValidAfter": )(\d+),`).ReplaceAll(pp, []byte(`${1}`+va+`,`))
 	pp = regexp.MustCompile(`("ValidBefore": )(\d+),`).ReplaceAll(pp, []byte(`${1}`+vb+`,`))
 	return pp
