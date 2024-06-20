@@ -1,7 +1,6 @@
 package sshca
 
 import (
-	"cmp"
 	"crypto/ed25519"
 	"crypto/rand"
 	"embed"
@@ -29,11 +28,6 @@ import (
 
 type (
 	appHandler func(http.ResponseWriter, *http.Request) error
-
-	sessionInfo struct {
-		user      string
-		publicKey ssh.PublicKey
-	}
 
 	Provisioner struct {
 		ConfigurationEndpoint string `json:"configurationEndpoint"`
@@ -81,11 +75,14 @@ var (
 	}
 	Config  Conf
 	tmpl    *template.Template
-	claims  = &rendezvous{info: map[string]certInfo{}}
+	claims  = &rendezvous{}
 	client  = &http.Client{Timeout: 2 * time.Second}
 	funcMap = template.FuncMap{
 		"PathEscape": url.PathEscape,
 	}
+
+	errWait    = errors.New("wait")
+	errTimeout = errors.New("timeout")
 )
 
 func Sshca() {
@@ -108,7 +105,7 @@ func sshcaRouter(w http.ResponseWriter, r *http.Request) (err error) {
 	r.ParseForm()
 	path := strings.Split(r.URL.Path+"//", "/")
 	p := path[1]
-	switch p { // handle /www /feedback /sso and /<token>
+	switch p { // handle /www /feedback /sso
 	case "www":
 		http.ServeFileFS(w, r, Config.WWW, r.URL.Path)
 		return
@@ -119,26 +116,9 @@ func sshcaRouter(w http.ResponseWriter, r *http.Request) (err error) {
 	case "sso": // returning from login
 		return ssoHandler(w, r)
 	default:
-		p2 := path[2]
-		var token string
-		var ci certInfo
-		var tkOK bool
 		config, caOK := Config.CaConfigs[p]
-		if !caOK {
-			config, caOK = Config.CaConfigs[p2]
-			ci, token, tkOK = claims.get(p)
-		}
-		if !tkOK {
-			ci, token, tkOK = claims.get(p2)
-		}
-		if !caOK && tkOK {
-			config, caOK = Config.CaConfigs[ci.ca]
-		}
-		if token == "" {
-			token = claims.put(ci) //
-		}
-
 		if caOK { // handle /<ca>/.*
+			p2 := path[2]
 			switch p2 {
 			case "config":
 				jsonTxt, _ := json.MarshalIndent(config, "", "    ")
@@ -147,13 +127,16 @@ func sshcaRouter(w http.ResponseWriter, r *http.Request) (err error) {
 				return
 			case "sign":
 				return sshsignHandler(w, r)
-			default: // we assume we have a valid token
+			default:
+				if config.ClientID != "" {
+					err = deviceflowHandler(w, config)
+					return
+				}
+				err = tmpl.ExecuteTemplate(w, "login", map[string]string{"ca": config.Id, "sshport": Config.SshPort, "ri": "/ri?ca=" + config.Id})
+				return
 			}
-			ci.ca = config.Id
-			claims.upd(token, ci)
-			return tokenHandler(w, r, token, ci, config)
 		}
-		err = tmpl.ExecuteTemplate(w, "listCAs", map[string]any{"config": Config.CaConfigs, "token": token})
+		err = tmpl.ExecuteTemplate(w, "listCAs", map[string]any{"config": Config.CaConfigs})
 		return
 	}
 }
@@ -218,53 +201,34 @@ func (fn appHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func riHandler(w http.ResponseWriter, r *http.Request) (err error) {
-	_, token, ok := claims.get(r.Form.Get("state")) // valid token
-	if !ok {
-		token = claims.put(certInfo{ca: r.Form.Get("ca")})
+	r.ParseForm()
+	ca := r.Form.Get("ca")
+	if _, ok := Config.CaConfigs[ca]; ok {
+		token := claims.set("", certInfo{ca: ca})
+		data := url.Values{}
+		data.Set("state", token)
+		data.Set("idpentityid", r.Form.Get("entityID"))
+		http.Redirect(w, r, "/sso?"+data.Encode(), http.StatusFound)
 	}
-	data := url.Values{}
-	data.Set("state", token)
-	data.Set("idpentityid", r.Form.Get("entityID"))
-	http.Redirect(w, r, "/sso?"+data.Encode(), http.StatusFound)
 	return
 }
 
 func ssoHandler(w http.ResponseWriter, r *http.Request) (err error) {
 	r.ParseForm()
-	if ci, token, ok := claims.get(r.Form.Get("state")); ok { // see if it is a token
+	token := r.Form.Get("state")
+	if ci, ok := claims.get(token); ok { // see if it is a token
 		principal := r.Header.Get(Config.Principal)
 		if Config.CaConfigs[ci.ca].Fake {
 			principal = "a_really_fake_principal"
 		}
 		if principal != "" {
 			attrs := map[string]any{"eduPersonPrincipalName": principal}
-			claims.meet(token, certInfo{claims: attrs})
-			claims.set(token+"_feedback", certInfo{})
+			ci.claims = attrs
+			claims.set(token, ci)
 			err = tmpl.ExecuteTemplate(w, "login", map[string]any{"ca": ci.ca, "state": token, "sshport": Config.SshPort, "ri": "/ri?ca=" + ci.ca})
 		}
 	}
 	return
-}
-
-func tokenHandler(w http.ResponseWriter, r *http.Request, token string, ci certInfo, config CaConfig) (err error) {
-	r.ParseForm()
-	ca, idp := config.Id, cmp.Or(ci.idp, r.Form.Get("idpentityid"))
-	if config.ClientID != "" {
-		err = deviceflowHandler(w, config, token)
-		return
-	} else if idp == "" {
-		err = tmpl.ExecuteTemplate(w, "login", map[string]string{"token": token, "ca": ca, "sshport": Config.SshPort, "ri": "/ri?ca=" + ca + "&state=" + token})
-		return
-	} else {
-		if config.Fake {
-			return
-		}
-		data := url.Values{}
-		data.Set("state", token)
-		data.Set("idpentityid", idp)
-		http.Redirect(w, r, "/sso?"+data.Encode(), http.StatusFound)
-		return
-	}
 }
 
 func feedbackHandler(w http.ResponseWriter, r *http.Request) (err error) {
@@ -408,15 +372,16 @@ func handleSSHConnection(nConn net.Conn, sshConfig *ssh.ServerConfig) {
 					req.Reply(true, nil)
 					continue
 				}
-				xtra, err := claims.wait(token)
-				if user != "" && err == nil {
-					cert, err := newCertificate(Config.CaConfigs[xtra.ca], publicKey, xtra.claims)
+				ci, ok := claims.get(token)
+				if ok && user != "" && !ci.used {
+					cert, err := newCertificate(Config.CaConfigs[ci.ca], publicKey, ci.claims)
 					if err == nil {
 						certTxt := ssh.MarshalAuthorizedKey(cert)
-						// keyName := si.publicKey.Type()[4:]
-						io.WriteString(channel, fmt.Sprintf("%s\n", certTxt)) //, keyName)) // certTxt already have a linefeed at the end ..
+						fmt.Fprintf(channel, "%s", certTxt)
+						ci.cert = cert
+						ci.used = true
+						claims.set(token, ci)
 					}
-					claims.meet(token+"_feedback", certInfo{cert: cert, err: err})
 				}
 				channel.Close()
 			}
