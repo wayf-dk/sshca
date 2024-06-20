@@ -541,107 +541,54 @@ func PP(i ...interface{}) {
 
 type (
 	certInfo struct {
-		ch        chan bool
-		created   time.Time
-		ca, idp   string
-		claims    map[string]any
-		cert      *ssh.Certificate
-		waitedFor bool
-		err       error
+		ca     string
+		claims map[string]any
+		cert   *ssh.Certificate
+		eol    time.Time
+		used   bool
 	}
 
 	rendezvous struct {
-		mx   sync.RWMutex
-		info map[string]certInfo
+		info sync.Map
 		ttl  time.Duration
 	}
 )
 
 func (rv *rendezvous) cleanUp() {
-	ticker := time.NewTicker(60 * time.Second)
+	ticker := time.NewTicker(Config.RendevousTTL * time.Second)
 	go func() {
 		for {
 			<-ticker.C
-			rv.mx.Lock()
-			toOld := time.Now().Add(-rv.ttl)
-			for k, v := range rv.info {
-				if v.created.Before(toOld) {
-					delete(rv.info, k)
+			rv.info.Range(func(k, v interface{}) bool {
+				if v.(certInfo).eol.Before(time.Now()) {
+					rv.info.Delete(k)
 				}
-			}
-			rv.mx.Unlock()
+				return true
+			})
 		}
 	}()
 }
 
-func (rv *rendezvous) upd(token string, xtra certInfo) {
-	rv.mx.Lock()
-	defer rv.mx.Unlock()
-	old, _ := rv.info[token]
-	xtra.ch = old.ch
-	xtra.created = old.created
-	rv.info[token] = xtra
-	return
+func (rv *rendezvous) set(token string, ci certInfo) string {
+	if token == "" {
+		token = nonce()
+	}
+	if ci.eol.IsZero() {
+		ci.eol = time.Now().Add(rv.ttl)
+	}
+	rv.info.Store(token, ci)
+	return token
 }
 
-func (rv *rendezvous) set(token string, xtra certInfo) {
-	rv.mx.Lock()
-	defer rv.mx.Unlock()
-	xtra.ch = make(chan bool, 1)
-	xtra.created = time.Now()
-	rv.info[token] = xtra
-	return
-}
-
-func (rv *rendezvous) put(xtra certInfo) (token string) {
-	token = nonce()
-	rv.set(token, xtra)
-	return
-}
-
-func (rv *rendezvous) get(token string) (xtra certInfo, tk string, ok bool) {
-	rv.mx.RLock()
-	defer rv.mx.RUnlock()
-	xtra, ok = rv.info[token]
+func (rv *rendezvous) get(token string) (ci certInfo, ok bool) {
+	a, ok := rv.info.Load(token)
 	if ok {
-		tk = token
+		ci = a.(certInfo)
+		if ci.eol.Before(time.Now()) {
+			rv.info.Delete(token)
+			return ci, false
+		}
 	}
-	return
-}
-
-func (rv *rendezvous) meet(token string, info certInfo) {
-	rv.mx.Lock()
-	defer rv.mx.Unlock()
-	xtra, ok := rv.info[token]
-	if ok {
-		xtra.ch <- true
-		xtra.claims = info.claims
-		xtra.cert = info.cert
-		xtra.err = info.err
-		rv.info[token] = xtra
-	}
-}
-
-func (rv *rendezvous) wait(token string) (xtra certInfo, err error) {
-	rv.mx.Lock()
-	xtra, ok := rv.info[token]
-	if !ok || xtra.waitedFor {
-    	rv.mx.Unlock()
-		err = errors.New("invalid token")
-		return
-	}
-	xtra.waitedFor = true
-	rv.info[token] = xtra
-    rv.mx.Unlock()
-	select {
-	case <-xtra.ch:
-	case <-time.After(rv.ttl):
-		err = errors.New("rendevouz timeout")
-	}
-	rv.mx.Lock()
-	defer rv.mx.Unlock()
-	xtra, _ = rv.info[token]
-	delete(rv.info, token)
 	return
 }
 
