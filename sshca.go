@@ -268,17 +268,22 @@ func tokenHandler(w http.ResponseWriter, r *http.Request, token string, ci certI
 }
 
 func feedbackHandler(w http.ResponseWriter, r *http.Request) (err error) {
-	r.ParseForm()
-	path := strings.Split(r.URL.Path, "/")
+	path := strings.Split(r.URL.Path+"//", "/")
 	token := path[2]
-	rec, err := claims.wait(token + "_feedback")
-	if err != nil {
-		return
+	ci, ok := claims.get(token)
+	w.Header().Set("X-Accel-Buffering", "no")
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	if ok && ci.cert != nil {
+		fmt.Fprintf(w, "%s\n\n", certPP(ci.cert, "data: "))
+		return nil
 	}
-	if rec.cert != nil {
-		w.Write(certPP(rec.cert))
+	if ok {
+		fmt.Fprintln(w, "data: wait\nretry: 2000\n")
+		return nil
 	}
-	return
+	fmt.Fprintln(w, "data: timeout\n")
+	return nil
 }
 
 func sshsignHandler(w http.ResponseWriter, r *http.Request) (err error) {
