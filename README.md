@@ -46,4 +46,4 @@ So clone the repo and:
 - click "Login with a fake principal"
 - copy the ssh command and run it in a shell - be aware that it will overwrite ~/.ssh/id_ed25519-cert.pub
 - the browser will show a dump of the downloaded certificate as feedback
-- run: `ssh -p 2221 demo@localhost demo` to se a dump of the certificate your SSH client would use if you tried to log in to a SSH server that required a ed25519 SSH certificate.
+- run: `ssh -p 2221 -o CertificateFile=~/.ssh/id_ed25519-cert.pub demo@localhost demo` to se a dump of the certificate your SSH client would use if you tried to log in to a SSH server that required a ed25519 SSH certificate.
