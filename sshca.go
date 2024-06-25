@@ -3,6 +3,7 @@ package sshca
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/sha256"
 	"embed"
 	"encoding/base64"
 	"encoding/hex"
@@ -48,6 +49,8 @@ type (
 		Id, Name, PublicKey      string
 		ClientID, ConfigEndpoint string
 		Settings                 Settings
+		DefaultPrincipals        []string
+		HashedPrincipal          bool
 		Op                       Opconfig   `json:"-"`
 		Signer                   ssh.Signer `json:"-"`
 	}
@@ -448,6 +451,11 @@ func newCertificate(ca CaConfig, pubkey ssh.PublicKey, claims map[string]any) (c
 		return nil, errors.New("no principal found")
 	}
 	now := time.Now().In(time.FixedZone("UTC", 0)).Unix()
+	principals := []string{principal}
+	if ca.HashedPrincipal {
+		hashed := sha256.Sum256([]byte(principal))
+		principals = append(principals, base64.RawURLEncoding.EncodeToString(hashed[:24]))
+	}
 	cert = &ssh.Certificate{
 		CertType: ssh.UserCert,
 		Key:      pubkey,
@@ -457,7 +465,7 @@ func newCertificate(ca CaConfig, pubkey ssh.PublicKey, claims map[string]any) (c
 			// Extensions:      map[string]string{"permit-agent-forwarding": "", "permit-pty": "", "groups@wayf.dk": data},
 		},
 		KeyId:           principal,
-		ValidPrincipals: []string{principal},
+		ValidPrincipals: append(ca.DefaultPrincipals, principals...),
 		ValidAfter:      uint64(now - 60),
 		ValidBefore:     uint64(now + ca.Settings.Ttl),
 	}
