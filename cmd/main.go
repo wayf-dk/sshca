@@ -26,6 +26,8 @@ func main() {
 			    Name:      "Demo CA",
 				Signer:    signer,
 				PublicKey: publicKey,
+				DefaultPrincipals: []string{"login"},
+				HashedPrincipal: true,
 				Settings: sshca.Settings {
     				Ttl:    36 * 3600,
 				},
