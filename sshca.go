@@ -51,6 +51,7 @@ type (
 		Settings                 Settings
 		DefaultPrincipals        []string
 		HashedPrincipal          bool
+		MyAccessID               bool
 		Op                       Opconfig   `json:"-"`
 		Signer                   ssh.Signer `json:"-"`
 	}
@@ -220,15 +221,15 @@ func ssoHandler(w http.ResponseWriter, r *http.Request) (err error) {
 	r.ParseForm()
 	token := r.Form.Get("state")
 	if ci, ok := claims.get(token); ok { // see if it is a token
-		principal := r.Header.Get(Config.Principal)
-		if Config.CaConfigs[ci.ca].Fake {
-			principal = "a_really_fake_principal"
+		ci.principal = r.Header.Get(Config.Principal)
+		ca := Config.CaConfigs[ci.ca]
+		if ca.Fake {
+			ci.principal = "a_really_fake_principal"
 		}
-		if principal != "" {
-			attrs := map[string]any{"eduPersonPrincipalName": principal}
-			ci.claims = attrs
+		if ci.principal != "" {
+			ci.username = usernameFromPrincipal(ci.principal, ca)
 			claims.set(token, ci)
-			err = tmpl.ExecuteTemplate(w, "login", map[string]any{"ca": ci.ca, "state": token, "sshport": Config.SshPort, "ri": "/ri?ca=" + ci.ca})
+			err = tmpl.ExecuteTemplate(w, "login", map[string]any{"username": ci.username, "state": token, "sshport": Config.SshPort, "ri": "/ri?ca=" + ci.ca})
 		}
 	}
 	return
@@ -241,12 +242,17 @@ func feedbackHandler(w http.ResponseWriter, r *http.Request) (err error) {
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
+
 	if ok && ci.cert != nil {
-		fmt.Fprintf(w, "%s\n\n", certPP(ci.cert, "data: "))
+		fmt.Fprintf(w, "event: certready\n%s\n\n", certPP(ci.cert, "data: "))
+		return nil
+	}
+	if ok && ci.principal != "" {
+		fmt.Fprintf(w, "event: cmdready\ndata: %s\nretry: 2000\n\n", ci.username)
 		return nil
 	}
 	if ok {
-		fmt.Fprintln(w, "data: wait\nretry: 2000\n")
+		fmt.Fprintln(w, "data: wait\nretry: 1000\n")
 		return nil
 	}
 	fmt.Fprintln(w, "data: timeout\n")
@@ -276,7 +282,15 @@ func sshsignHandler(w http.ResponseWriter, r *http.Request) (err error) {
 	if err != nil {
 		return
 	}
-	sshCertificate, err := newCertificate(config, publicKey, resp)
+
+	val, ok := resp["sub"].(string)
+	if !ok {
+		return fmt.Errorf("sub not found: %s", ca)
+	}
+
+	ci := certInfo{principal: val, username: usernameFromPrincipal(val, config)}
+
+	sshCertificate, err := newCertificate(config, publicKey, ci)
 	if err != nil {
 		return
 	}
@@ -438,23 +452,15 @@ func demoCert(channel ssh.Channel, publicKey ssh.PublicKey) {
 	}
 }
 
-func newCertificate(ca CaConfig, pubkey ssh.PublicKey, claims map[string]any) (cert *ssh.Certificate, err error) {
+func newCertificate(ca CaConfig, pubkey ssh.PublicKey, ci certInfo) (cert *ssh.Certificate, err error) {
 	if _, ok := pubkey.(*ssh.Certificate); ok {
 		pubkey = pubkey.(*ssh.Certificate).Key
 	}
-	var principal string
-	if val, ok := claims["eduPersonPrincipalName"].(string); ok {
-		principal = val
-	} else if val, ok := claims["sub"].(string); ok {
-		principal = val
-	} else {
-		return nil, errors.New("no principal found")
-	}
+
 	now := time.Now().In(time.FixedZone("UTC", 0)).Unix()
-	principals := []string{principal}
-	if ca.HashedPrincipal {
-		hashed := sha256.Sum256([]byte(principal))
-		principals = append(principals, base64.RawURLEncoding.EncodeToString(hashed[:24]))
+	principals := []string{ci.principal}
+	if ci.username != "" {
+		principals = append(principals, ci.username)
 	}
 	cert = &ssh.Certificate{
 		CertType: ssh.UserCert,
@@ -464,12 +470,25 @@ func newCertificate(ca CaConfig, pubkey ssh.PublicKey, claims map[string]any) (c
 			Extensions:      map[string]string{"permit-agent-forwarding": "", "permit-pty": ""},
 			// Extensions:      map[string]string{"permit-agent-forwarding": "", "permit-pty": "", "groups@wayf.dk": data},
 		},
-		KeyId:           principal,
+		KeyId:           ci.principal,
 		ValidPrincipals: append(ca.DefaultPrincipals, principals...),
 		ValidAfter:      uint64(now - 60),
 		ValidBefore:     uint64(now + ca.Settings.Ttl),
 	}
 	err = cert.SignCert(rand.Reader, ca.Signer)
+	return
+}
+
+func usernameFromPrincipal(principal string, ca CaConfig) (username string) {
+    if ca.HashedPrincipal {
+    	hashed := sha256.Sum256([]byte(principal))
+	    username = strings.TrimLeft(base64.RawURLEncoding.EncodeToString(hashed[:24]), "-") // - (dash) not allowed as 1st character
+	    return
+	}
+	if ca.MyAccessID {
+    	username = strings.ReplaceAll(principal[:35], "-", "")
+    	return
+    }
 	return
 }
 
@@ -514,11 +533,11 @@ func PP(i ...interface{}) {
 
 type (
 	certInfo struct {
-		ca     string
-		claims map[string]any
-		cert   *ssh.Certificate
-		eol    time.Time
-		used   bool
+		ca        string
+		principal string
+		username  string
+		cert      *ssh.Certificate
+		eol       time.Time
 	}
 
 	rendezvous struct {

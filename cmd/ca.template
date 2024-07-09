@@ -74,6 +74,8 @@ td { padding: 0.2em 0.5em; }
 </section>
 
 <section id=auto class=hidden>
+<h2>Username</h2>
+<pre id=username>{{ .username }}</pre>
 <h2>Installed certificate</h2>
 <pre id=cert></pre>
 </section>
@@ -91,7 +93,6 @@ function setCurl() {
         const host = window.location.hostname
         const getCertCmd = `ssh -p ${sshport} ${window.location.hostname} token ${t}  > ~/.ssh/id_ed25519-cert.pub`
         const curl = document.querySelector('#curl')
-        curl.innerText = getCertCmd
 
 		range = document.createRange()
 		range.selectNodeContents(curl)
@@ -101,18 +102,18 @@ function setCurl() {
 		sel.addRange(range)
 
         feedback = new EventSource(`/feedback/${t}`)
-        feedback.onmessage = (e) => {
-            switch (e.data) {
-            case 'wait':
-                break
-            default:
-                document.querySelector('#cert').innerText = e.data
-                document.querySelector('#manual').style.display = 'none'
-                document.querySelector('#login').style.display = 'none'
-                document.querySelector('#auto').style.display = 'block'
-                feedback.close()
-            }
-        }
+        feedback.onmessage = (e) => { if (e.data == "timeout") { feedback.close()}} // timeout is channelless ...
+        feedback.addEventListener("cmdready", (e) => {
+            document.querySelector('#username').innerText = e.data
+             document.querySelector('#curl').innerText = getCertCmd
+        })
+        feedback.addEventListener("certready", (e) => {
+            document.querySelector('#cert').innerText = e.data
+            document.querySelector('#manual').style.display = 'none'
+            document.querySelector('#auto').style.display = 'block'
+            document.querySelector('#login').style.display = 'none'
+            feedback.close()
+        })
     } else {
         ['auto', 'manual'].forEach(e => document.querySelector(`#${e}`).style.display = 'none')
     }

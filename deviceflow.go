@@ -3,6 +3,7 @@ package sshca
 import (
 	"encoding/json"
 	"errors"
+    "fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -15,7 +16,7 @@ func deviceflowHandler(w http.ResponseWriter, caConfig CaConfig) (err error) {
 	if err != nil {
 		return
 	}
-	tmpl.ExecuteTemplate(w, "login", map[string]string{"ca": caConfig.Name, "state": token, "sshport": Config.SshPort, "verification_uri": resp["verification_uri_complete"].(string)})
+   	tmpl.ExecuteTemplate(w, "login", map[string]string{"ca": caConfig.Name, "state": token, "sshport": Config.SshPort, "verification_uri": resp["verification_uri_complete"].(string)})
 	go func(token string) {
 		tokenResponse, _ := token_request(caConfig.ClientID, caConfig.Op.Token, resp["device_code"].(string))
 		if tokenResponse != nil {
@@ -23,7 +24,11 @@ func deviceflowHandler(w http.ResponseWriter, caConfig CaConfig) (err error) {
 			if err != nil {
 				return
 			}
-			claims.set(token, certInfo{ca: caConfig.Id, claims: userInfo})
+            val, ok := userInfo["sub"].(string)
+            if ok {
+                ci := certInfo{ca: caConfig.Id, principal: val, username: usernameFromPrincipal(val, caConfig)}
+                claims.set(token, ci)
+           }
 		}
 	}(token)
 	return
