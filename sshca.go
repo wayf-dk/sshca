@@ -9,7 +9,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"flag"
 	"fmt"
 	"html/template"
 	"io"
@@ -377,34 +376,26 @@ func handleSSHConnection(nConn net.Conn, sshConfig *ssh.ServerConfig) {
 			case "exec":
 				args := strings.Split(string(req.Payload[4:])+"  ", " ") // always at least 2 elements
 				cmd, token := args[0], args[1]
-				f1 := flag.NewFlagSet("", flag.ExitOnError)
-				f1.Parse(args[1:])
 				switch cmd {
-				case "token": // just fall thru
+				case "token":
+                    ci, ok := claims.get(token)
+                    if ok && user != "" && ci.cert == nil {
+                        cert, err := newCertificate(Config.CaConfigs[ci.ca], publicKey, ci)
+                        if err == nil {
+                            certTxt := ssh.MarshalAuthorizedKey(cert)
+                            fmt.Fprintf(channel, "%s", certTxt)
+                            ci.cert = cert
+                            claims.set(token, ci)
+                        }
+                    }
 				case "demo":
 					demoCert(channel, publicKey)
-					channel.Close()
-					return
-				default:
-					req.Reply(true, nil)
-					continue
-				}
-				ci, ok := claims.get(token)
-				if ok && user != "" && !ci.used {
-					cert, err := newCertificate(Config.CaConfigs[ci.ca], publicKey, ci.claims)
-					if err == nil {
-						certTxt := ssh.MarshalAuthorizedKey(cert)
-						fmt.Fprintf(channel, "%s", certTxt)
-						ci.cert = cert
-						ci.used = true
-						claims.set(token, ci)
-					}
 				}
 				channel.Close()
+			case "shell":
+			    channel.Close()
 			}
-			req.Reply(true, nil)
 		}
-		channel.Close()
 	}
 	conn.Close()
 }
