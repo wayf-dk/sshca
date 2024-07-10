@@ -94,19 +94,22 @@ function setCurl() {
         const getCertCmd = `ssh -p ${sshport} ${window.location.hostname} token ${t}  > ~/.ssh/id_ed25519-cert.pub`
         const curl = document.querySelector('#curl')
 
-		range = document.createRange()
-		range.selectNodeContents(curl)
-
-        sel = window.getSelection()
-		sel.removeAllRanges()
-		sel.addRange(range)
-
         feedback = new EventSource(`/feedback/${t}`)
-        feedback.onmessage = (e) => { if (e.data == "timeout") { feedback.close()}} // timeout is channelless ...
+        feedback.onmessage = (e) => {
+            if (e.data == "timeout") { // timeout is channelless ...
+                feedback.close()
+                document.querySelector('#manual').style.display = 'none'
+            }
+        }
         feedback.addEventListener("cmdready", (e) => {
             document.querySelector('#username').innerText = e.data
-             document.querySelector('#curl').innerText = getCertCmd
-        })
+            document.querySelector('#curl').innerText = getCertCmd
+            const sel = window.getSelection()
+            const range = document.createRange()
+            range.selectNodeContents(curl)
+            sel.removeAllRanges()
+            sel.addRange(range)
+       })
         feedback.addEventListener("certready", (e) => {
             document.querySelector('#cert').innerText = e.data
             document.querySelector('#manual').style.display = 'none'

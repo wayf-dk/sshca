@@ -247,7 +247,7 @@ func feedbackHandler(w http.ResponseWriter, r *http.Request) (err error) {
 		return nil
 	}
 	if ok && ci.principal != "" {
-		fmt.Fprintf(w, "event: cmdready\ndata: %s\nretry: 2000\n\n", ci.username)
+		fmt.Fprintf(w, "event: cmdready\ndata: %s\nretry: 1000\n\n", ci.username)
 		return nil
 	}
 	if ok {
