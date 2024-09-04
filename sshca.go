@@ -71,6 +71,10 @@ type (
 	}
 )
 
+const (
+    sseRetry = 1000
+)
+
 var (
 	allowedKeyTypes = map[string]bool{
 		"ssh-ed25519":                      true,
@@ -247,14 +251,14 @@ func feedbackHandler(w http.ResponseWriter, r *http.Request) (err error) {
 		return nil
 	}
 	if ok && ci.principal != "" {
-		fmt.Fprintf(w, "event: cmdready\ndata: %s\nretry: 1000\n\n", ci.username)
+		fmt.Fprintf(w, "event: cmdready\ndata: %s\nretry: %d\n\n", ci.username, sseRetry)
 		return nil
 	}
 	if ok {
-		fmt.Fprintln(w, "data: wait\nretry: 1000\n")
+		fmt.Fprintf(w, "data: wait\nretry: %d\n", sseRetry)
 		return nil
 	}
-	fmt.Fprintln(w, "data: timeout\n")
+	fmt.Fprintln(w, "data: timeout")
 	return nil
 }
 
