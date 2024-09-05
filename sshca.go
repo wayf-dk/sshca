@@ -44,15 +44,15 @@ type (
 	}
 
 	CaConfig struct {
-		Fake, Hide               bool
-		Id, Name, PublicKey      string
-		ClientID, ConfigEndpoint string
-		Settings                 Settings
-		DefaultPrincipals        []string
-		HashedPrincipal          bool
-		MyAccessID               bool
-		Op                       Opconfig   `json:"-"`
-		Signer                   ssh.Signer `json:"-"`
+		Fake, Hide                              bool
+		Id, Name, PublicKey                     string
+		ClientID, ConfigEndpoint                string
+		Settings                                Settings
+		DefaultPrincipals, AuthnContextClassRef []string
+		HashedPrincipal                         bool
+		MyAccessID                              bool
+		Op                                      Opconfig   `json:"-"`
+		Signer                                  ssh.Signer `json:"-"`
 	}
 
 	Conf struct {
@@ -64,6 +64,8 @@ type (
 		SshListenOn               string
 		WebListenOn               string
 		Principal                 string
+		AuthnContextClassRef      string
+		Assurance                 string
 		CaConfigs                 map[string]CaConfig
 		Cryptokilib               string
 		Slot                      string
@@ -72,7 +74,7 @@ type (
 )
 
 const (
-    sseRetry = 1000
+	sseRetry = 1000
 )
 
 var (
@@ -210,10 +212,13 @@ func (fn appHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func riHandler(w http.ResponseWriter, r *http.Request) (err error) {
 	r.ParseForm()
 	ca := r.Form.Get("ca")
-	if _, ok := Config.CaConfigs[ca]; ok {
+	if conf, ok := Config.CaConfigs[ca]; ok {
 		token := claims.set("", certInfo{ca: ca})
 		data := url.Values{}
 		data.Set("state", token)
+		if len(conf.AuthnContextClassRef) > 0 {
+    		data.Set("acr", conf.AuthnContextClassRef[0])
+    	}
 		data.Set("idpentityid", r.Form.Get("entityID"))
 		http.Redirect(w, r, "/sso?"+data.Encode(), http.StatusFound)
 	}
@@ -230,6 +235,12 @@ func ssoHandler(w http.ResponseWriter, r *http.Request) (err error) {
 			ci.principal = "a_really_fake_principal"
 		}
 		if ci.principal != "" {
+            wantedAcrs := ca.AuthnContextClassRef
+            acrs := strings.Split(r.Header.Get(Config.AuthnContextClassRef), ",")
+		    acrs = append(acrs, strings.Split(r.Header.Get(Config.Assurance), ",")...)
+            if len(wantedAcrs) > 0 && intersectionEmpty(wantedAcrs, acrs) {
+                return fmt.Errorf("no valid AuthnContextClassRef found: %v vs. %v", wantedAcrs, acrs)
+            }
 			ci.username = usernameFromPrincipal(ci.principal, ca)
 			claims.set(token, ci)
 			err = tmpl.ExecuteTemplate(w, "login", map[string]any{"username": ci.username, "state": token, "sshport": Config.SshPort, "ri": "/ri?ca=" + ci.ca})
@@ -382,22 +393,22 @@ func handleSSHConnection(nConn net.Conn, sshConfig *ssh.ServerConfig) {
 				cmd, token := args[0], args[1]
 				switch cmd {
 				case "token":
-                    ci, ok := claims.get(token)
-                    if ok && user != "" && ci.cert == nil {
-                        cert, err := newCertificate(Config.CaConfigs[ci.ca], publicKey, ci)
-                        if err == nil {
-                            certTxt := ssh.MarshalAuthorizedKey(cert)
-                            fmt.Fprintf(channel, "%s", certTxt)
-                            ci.cert = cert
-                            claims.set(token, ci)
-                        }
-                    }
+					ci, ok := claims.get(token)
+					if ok && user != "" && ci.cert == nil {
+						cert, err := newCertificate(Config.CaConfigs[ci.ca], publicKey, ci)
+						if err == nil {
+							certTxt := ssh.MarshalAuthorizedKey(cert)
+							fmt.Fprintf(channel, "%s", certTxt)
+							ci.cert = cert
+							claims.set(token, ci)
+						}
+					}
 				case "demo":
 					demoCert(channel, publicKey)
 				}
 				channel.Close()
 			case "shell":
-			    channel.Close()
+				channel.Close()
 			}
 		}
 	}
@@ -475,15 +486,15 @@ func newCertificate(ca CaConfig, pubkey ssh.PublicKey, ci certInfo) (cert *ssh.C
 }
 
 func usernameFromPrincipal(principal string, ca CaConfig) (username string) {
-    if ca.HashedPrincipal {
-    	hashed := sha256.Sum256([]byte(principal))
-	    username = strings.TrimLeft(base64.RawURLEncoding.EncodeToString(hashed[:24]), "-") // - (dash) not allowed as 1st character
-	    return
+	if ca.HashedPrincipal {
+		hashed := sha256.Sum256([]byte(principal))
+		username = strings.TrimLeft(base64.RawURLEncoding.EncodeToString(hashed[:24]), "-") // - (dash) not allowed as 1st character
+		return
 	}
 	if ca.MyAccessID {
-    	username = strings.ReplaceAll(principal[:35], "-", "")
-    	return
-    }
+		username = strings.ReplaceAll(principal[:35], "-", "")
+		return
+	}
 	return
 }
 
@@ -602,3 +613,17 @@ func GetSignerFromSshAgent() (pubkey string, signer ssh.Signer) {
 	log.Fatalln("No ed25519 keys available in ssh-agent")
 	return
 }
+
+func intersectionEmpty(s1, s2 []string) (res bool) {
+	hash := make(map[string]bool)
+	for _, e := range s1 {
+		hash[e] = true
+	}
+	for _, e := range s2 {
+		if hash[e] {
+			return false
+		}
+	}
+	return true
+}
+
