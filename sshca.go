@@ -46,7 +46,7 @@ type (
 	CaConfig struct {
 		Fake, Hide                              bool
 		Id, Name, PublicKey                     string
-		ClientID, ConfigEndpoint                string
+		ClientID, ConfigEndpoint, SSHTemplate   string
 		Settings                                Settings
 		DefaultPrincipals, AuthnContextClassRef []string
 		HashedPrincipal                         bool
@@ -243,7 +243,7 @@ func ssoHandler(w http.ResponseWriter, r *http.Request) (err error) {
             }
 			ci.username = usernameFromPrincipal(ci.principal, ca)
 			claims.set(token, ci)
-			err = tmpl.ExecuteTemplate(w, "login", map[string]any{"username": ci.username, "state": token, "sshport": Config.SshPort, "ri": "/ri?ca=" + ci.ca})
+			err = tmpl.ExecuteTemplate(w, "login", map[string]any{"username": ci.username, "token": token, "sshport": Config.SshPort, "ri": "/ri?ca=" + ci.ca, "sshtemplate": ca.SSHTemplate })
 		}
 	}
 	return
