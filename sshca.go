@@ -266,10 +266,10 @@ func feedbackHandler(w http.ResponseWriter, r *http.Request) (err error) {
 		return nil
 	}
 	if ok {
-		fmt.Fprintf(w, "data: wait\nretry: %d\n", sseRetry)
+		fmt.Fprintf(w, "data: wait\nretry: %d\n\n", sseRetry)
 		return nil
 	}
-	fmt.Fprintln(w, "data: timeout")
+	fmt.Fprintf(w, "event: timeout\ndata: %s\n\n", "timeout")
 	return nil
 }
 
