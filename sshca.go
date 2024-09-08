@@ -138,11 +138,7 @@ func sshcaRouter(w http.ResponseWriter, r *http.Request) (err error) {
 			case "sign":
 				return sshsignHandler(w, r)
 			default:
-				if config.ClientID != "" {
-					err = deviceflowHandler(w, config)
-					return
-				}
-				err = tmpl.ExecuteTemplate(w, "login", map[string]string{"ca": config.Id, "sshport": Config.SshPort, "ri": "/ri?ca=" + config.Id})
+				err = tmpl.ExecuteTemplate(w, "login", map[string]any{"ca": config})
 				return
 			}
 		}
@@ -214,12 +210,16 @@ func riHandler(w http.ResponseWriter, r *http.Request) (err error) {
 	r.ParseForm()
 	ca := r.Form.Get("ca")
 	if conf, ok := Config.CaConfigs[ca]; ok {
+		if conf.ClientID != "" {
+			err = deviceflowHandler(w, conf)
+			return
+		}
 		token := claims.set("", certInfo{ca: ca})
 		data := url.Values{}
 		data.Set("state", token)
 		if len(conf.AuthnContextClassRef) > 0 {
-    		data.Set("acr", conf.AuthnContextClassRef[0])
-    	}
+			data.Set("acr", conf.AuthnContextClassRef[0])
+		}
 		data.Set("idpentityid", r.Form.Get("entityID"))
 		http.Redirect(w, r, "/sso?"+data.Encode(), http.StatusFound)
 	}
