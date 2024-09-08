@@ -56,6 +56,7 @@ type (
 	}
 
 	Conf struct {
+		RelayingParty             string
 		WWW                       embed.FS
 		Template                  string
 		Verification_uri_template string
