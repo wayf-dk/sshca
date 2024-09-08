@@ -237,12 +237,12 @@ func ssoHandler(w http.ResponseWriter, r *http.Request) (err error) {
 			ci.principal = "a_really_fake_principal"
 		}
 		if ci.principal != "" {
-            wantedAcrs := ca.AuthnContextClassRef
-            acrs := strings.Split(r.Header.Get(Config.AuthnContextClassRef), ",")
-		    acrs = append(acrs, strings.Split(r.Header.Get(Config.Assurance), ",")...)
-            if len(wantedAcrs) > 0 && intersectionEmpty(wantedAcrs, acrs) {
-                return fmt.Errorf("no valid AuthnContextClassRef found: %v vs. %v", wantedAcrs, acrs)
-            }
+			wantedAcrs := ca.AuthnContextClassRef
+			acrs := strings.Split(r.Header.Get(Config.AuthnContextClassRef), ",")
+			acrs = append(acrs, strings.Split(r.Header.Get(Config.Assurance), ",")...)
+			if len(wantedAcrs) > 0 && intersectionEmpty(wantedAcrs, acrs) {
+				return fmt.Errorf("no valid AuthnContextClassRef found: %v vs. %v", wantedAcrs, acrs)
+			}
 			ci.username = usernameFromPrincipal(ci.principal, ca)
 			claims.set(token, ci)
 			err = tmpl.ExecuteTemplate(w, "login", map[string]any{"ci": ci, "ca": ca, "token": token, "sshport": Config.SshPort})
