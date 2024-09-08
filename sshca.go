@@ -245,7 +245,7 @@ func ssoHandler(w http.ResponseWriter, r *http.Request) (err error) {
             }
 			ci.username = usernameFromPrincipal(ci.principal, ca)
 			claims.set(token, ci)
-			err = tmpl.ExecuteTemplate(w, "login", map[string]any{"username": ci.username, "token": token, "sshport": Config.SshPort, "ri": "/ri?ca=" + ci.ca, "sshtemplate": ca.SSHTemplate })
+			err = tmpl.ExecuteTemplate(w, "login", map[string]any{"ci": ci, "ca": ca, "token": token, "sshport": Config.SshPort})
 		}
 	}
 	return
