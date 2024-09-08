@@ -15,7 +15,7 @@ func deviceflowHandler(w http.ResponseWriter, caConfig CaConfig) (err error) {
 	if err != nil {
 		return
 	}
-   	tmpl.ExecuteTemplate(w, "login", map[string]string{"ca": caConfig.Name, "state": token, "sshport": Config.SshPort, "verification_uri": resp["verification_uri_complete"].(string)})
+   	tmpl.ExecuteTemplate(w, "login", map[string]any{"ca": caConfig, "token": token, "sshport": Config.SshPort, "verification_uri": resp["verification_uri_complete"].(string)})
 	go func(token string) {
 		tokenResponse, _ := token_request(caConfig.ClientID, caConfig.Op.Token, resp["device_code"].(string))
 		if tokenResponse != nil {
