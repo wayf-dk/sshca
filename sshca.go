@@ -673,4 +673,3 @@ func intersectionEmpty(s1, s2 []string) (res bool) {
 	}
 	return true
 }
-
