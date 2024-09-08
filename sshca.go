@@ -313,6 +313,51 @@ func sshsignHandler(w http.ResponseWriter, r *http.Request) (err error) {
 	return
 }
 
+func mindthegapHandler(w http.ResponseWriter, r *http.Request) (err error) {
+	r.ParseForm()
+	const COOKIE = "RA21IDP"
+	ca := r.Form.Get("ca")
+	if config, ok := Config.CaConfigs[ca]; ok {
+		riURL := "/ri?ca=" + ca
+		idpName := "Access through your Institution"
+		if config.ClientID != "" {
+			idpName = config.Name
+			err = tmpl.ExecuteTemplate(w, "mindthegap", map[string]string{"idpName": idpName, "riURL": riURL})
+			return
+		}
+		entityID := r.Form.Get("entityID")
+		ret := "https://" + r.Host + "/mindthegap/?ca=" + ca
+		discoURL := "https://wayf.wayf.dk/ds?return=" + url.QueryEscape(ret) + "&returnIDParam=entityID&entityID=" + url.QueryEscape(Config.RelayingParty) + "&policy=v2"
+		entityIDJSON := ""
+		if tmp, err := r.Cookie(COOKIE); err == nil {
+			if data, err := base64.StdEncoding.DecodeString(tmp.Value); err == nil {
+				entityIDJSON = string(data)
+			}
+		}
+		if entityID != "" {
+			entityIDJSON = r.Form.Get("entityIDJSON")
+			http.SetCookie(w, &http.Cookie{Name: COOKIE, Value: base64.URLEncoding.EncodeToString([]byte(entityIDJSON)), Path: "/mindthegap", Secure: true, HttpOnly: true, MaxAge: 34560000})
+			http.Redirect(w, r, "https://"+r.Host+"/"+ca, http.StatusFound)
+			return
+		}
+		idprec := struct {
+			EntityID     string
+			DisplayNames map[string]string
+		}{}
+		err := json.Unmarshal([]byte(entityIDJSON), &idprec)
+		if err == nil {
+			idpName = idprec.DisplayNames["en"]
+			riURL += "&entityID=" + url.QueryEscape(idprec.EntityID)
+		} else {
+			discoURL += ",mindthegap"
+			riURL = discoURL
+		}
+		p := map[string]string{"idpName": idpName, "riURL": riURL, "discoURL": discoURL}
+		err = tmpl.ExecuteTemplate(w, "mindthegap", p)
+	}
+	return
+}
+
 func sshserver() {
 	sshConfig := &ssh.ServerConfig{
 		// Remove to disable public key auth.
