@@ -111,7 +111,6 @@ func Sshca() {
 }
 
 func sshcaRouter(w http.ResponseWriter, r *http.Request) (err error) {
-	r.ParseForm()
 	path := strings.Split(r.URL.Path+"//", "/")
 	p := path[1]
 	switch p { // handle /www /feedback /sso
@@ -124,6 +123,8 @@ func sshcaRouter(w http.ResponseWriter, r *http.Request) (err error) {
 		return riHandler(w, r)
 	case "sso": // returning from login
 		return ssoHandler(w, r)
+	case "mindthegap":
+		return mindthegapHandler(w, r)
 	default:
 		config, caOK := Config.CaConfigs[p]
 		if caOK { // handle /<ca>/.*
