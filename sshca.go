@@ -219,7 +219,7 @@ func riHandler(w http.ResponseWriter, r *http.Request) (err error) {
 		data := url.Values{}
 		data.Set("state", token)
 		if len(conf.AuthnContextClassRef) > 0 {
-			data.Set("acr", conf.AuthnContextClassRef[0])
+			data.Set("acr_values", strings.Join(conf.AuthnContextClassRef, " "))
 		}
 		data.Set("idpentityid", r.Form.Get("entityID"))
 		http.Redirect(w, r, "/sso?"+data.Encode(), http.StatusFound)
