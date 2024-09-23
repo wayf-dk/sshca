@@ -124,26 +124,29 @@ func sshcaRouter(w http.ResponseWriter, r *http.Request) (err error) {
 		return
 	case "feedback":
 		return feedbackHandler(w, r)
-	case "ri": // returning from mindthegap
-		return riHandler(w, r)
 	case "sso": // returning from login
 		return ssoHandler(w, r)
-	case "mindthegap":
-		return mindthegapHandler(w, r)
 	default:
-		config, caOK := Config.CaConfigs[p]
-		if caOK { // handle /<ca>/.*
+		ca, ok := Config.CaConfigs[p]
+		if ok { // handle /<ca>/.*
 			p2 := path[2]
 			switch p2 {
 			case "config":
-				jsonTxt, _ := json.MarshalIndent(config, "", "    ")
+				jsonTxt, _ := json.MarshalIndent(ca, "", "    ")
 				w.Header().Add("Content-Type", "application/json")
 				w.Write(jsonTxt)
 				return
 			case "sign":
 				return sshsignHandler(w, r)
+			case "mindthegap":
+				return mindthegap(w, r, ca)
+			case "ri":
+				return riHandler(w, r, ca)
 			default:
-				err = tmpl.ExecuteTemplate(w, "login", map[string]any{"ca": config})
+    			if err = mindthegapPassive(w, r, ca); err != nil {
+    			    return
+    			}
+				err = tmpl.ExecuteTemplate(w, "login", map[string]any{"ca": ca})
 				return
 			}
 		}
