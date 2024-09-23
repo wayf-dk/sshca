@@ -104,6 +104,7 @@ func Sshca() {
 	rendevouzTTL, _ = time.ParseDuration(Config.RendevouzTTL)
 	claims.ttl = ssoTTL
 	claims.cleanUp()
+	Config.SshPort = Config.SshListenOn[strings.Index(Config.SshListenOn, ":")+1:]
 	prepareCAs()
 	go sshserver()
 
