@@ -64,7 +64,7 @@ td { padding: 0.2em 0.5em; }
 <section class=ssh>
 <H2>SSH Certificate Authority Demo</h2>
 <p>The SSH Certificate Authority Demo creates SSH certificates based on a fake login.
-<p id=login><a href="{{ .ri }}">Login with a fake principal</a>
+<p id=login><a href="/demoCA/ri">Login with a fake principal</a>
 </section>
 
 <section id=manual>
