@@ -215,23 +215,20 @@ func (fn appHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	log.Printf("%s %s %s %+v %1.3f %d %s", remoteAddr, r.Method, r.Host, r.URL, time.Since(starttime).Seconds(), status, err)
 }
 
-func riHandler(w http.ResponseWriter, r *http.Request) (err error) {
+func riHandler(w http.ResponseWriter, r *http.Request, ca CaConfig) (err error) {
 	r.ParseForm()
-	ca := r.Form.Get("ca")
-	if conf, ok := Config.CaConfigs[ca]; ok {
-		if conf.ClientID != "" {
-			err = deviceflowHandler(w, conf)
-			return
-		}
-		token := claims.set("", certInfo{ca: ca})
-		data := url.Values{}
-		data.Set("state", token)
-		if len(conf.AuthnContextClassRef) > 0 {
-			data.Set("acr_values", strings.Join(conf.AuthnContextClassRef, " "))
-		}
-		data.Set("idpentityid", r.Form.Get("entityID"))
-		http.Redirect(w, r, "/sso?"+data.Encode(), http.StatusFound)
+	if ca.ClientID != "" {
+		err = deviceflowHandler(w, ca)
+		return
 	}
+	token := claims.set("", certInfo{ca: ca.Id})
+	data := url.Values{}
+	data.Set("state", token)
+	data.Set("idpentityid", r.Form.Get("entityID"))
+	if len(ca.AuthnContextClassRef) > 0 {
+		data.Set("acr_values", strings.Join(ca.AuthnContextClassRef, " "))
+	}
+	http.Redirect(w, r, "/sso?"+data.Encode(), http.StatusFound)
 	return
 }
 
