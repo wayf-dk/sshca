@@ -340,7 +340,7 @@ func mindthegapCheckIDPName(w http.ResponseWriter, r *http.Request, ca string) (
 }
 
 func mindthegapPassive(w http.ResponseWriter, r *http.Request, ca CaConfig) (err error) {
-    if ca.ClientID != "" {
+    if ca.ClientID != ""  || ca.Fake {
         return
     }
 	if _, err = mindthegapCheckIDPName(w, r, ca.Id); err == nil {
