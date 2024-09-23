@@ -252,7 +252,7 @@ func ssoHandler(w http.ResponseWriter, r *http.Request) (err error) {
 			ci.username = usernameFromPrincipal(ci.principal, ca)
 			ci.eol = time.Now().Add(rendevouzTTL)
 			claims.set(token, ci)
-			err = tmpl.ExecuteTemplate(w, "login", map[string]any{"ci": ci, "ca": ca, "token": token, "sshport": Config.SshPort})
+			err = tmpl.ExecuteTemplate(w, "login", map[string]any{"ci": ci, "ca": ca, "state": token, "sshport": Config.SshPort})
 		}
 	}
 	return
