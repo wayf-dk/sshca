@@ -75,7 +75,7 @@ type (
 )
 
 const (
-	sseRetry = 1000
+	sseRetry = 2000
 )
 
 var (
