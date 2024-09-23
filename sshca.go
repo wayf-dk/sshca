@@ -72,6 +72,11 @@ type (
 		Slot                      string
 		NoOfSessions              int
 	}
+
+	idprec struct {
+		EntityID     string
+		DisplayNames map[string]string
+	}
 )
 
 const (
@@ -321,48 +326,71 @@ func sshsignHandler(w http.ResponseWriter, r *http.Request) (err error) {
 	return
 }
 
-func mindthegapHandler(w http.ResponseWriter, r *http.Request) (err error) {
+func mindthegapCheckIDPName(w http.ResponseWriter, r *http.Request, ca string) (entityIDJSON string, err error) {
 	r.ParseForm()
-	const COOKIE = "RA21IDP"
-	ca := r.Form.Get("ca")
-	if config, ok := Config.CaConfigs[ca]; ok {
-		riURL := "/ri?ca=" + ca
-		idpName := "Access through your Institution"
-		if config.ClientID != "" {
-			idpName = config.Name
-			err = tmpl.ExecuteTemplate(w, "mindthegap", map[string]string{"idpName": idpName, "riURL": riURL})
-			return
-		}
-		entityID := r.Form.Get("entityID")
-		ret := "https://" + r.Host + "/mindthegap/?ca=" + ca
-		discoURL := "https://wayf.wayf.dk/ds?return=" + url.QueryEscape(ret) + "&returnIDParam=entityID&entityID=" + url.QueryEscape(Config.RelayingParty) + "&policy=v2"
-		entityIDJSON := ""
-		if tmp, err := r.Cookie(COOKIE); err == nil {
-			if data, err := base64.StdEncoding.DecodeString(tmp.Value); err == nil {
-				entityIDJSON = string(data)
-			}
-		}
-		if entityID != "" {
-			entityIDJSON = r.Form.Get("entityIDJSON")
-			http.SetCookie(w, &http.Cookie{Name: COOKIE, Value: base64.URLEncoding.EncodeToString([]byte(entityIDJSON)), Path: "/mindthegap", Secure: true, HttpOnly: true, MaxAge: 34560000})
-			http.Redirect(w, r, "https://"+r.Host+"/"+ca, http.StatusFound)
-			return
-		}
-		idprec := struct {
-			EntityID     string
-			DisplayNames map[string]string
-		}{}
-		err := json.Unmarshal([]byte(entityIDJSON), &idprec)
-		if err == nil {
-			idpName = idprec.DisplayNames["en"]
-			riURL += "&entityID=" + url.QueryEscape(idprec.EntityID)
-		} else {
-			discoURL += ",mindthegap"
-			riURL = discoURL
-		}
-		p := map[string]string{"idpName": idpName, "riURL": riURL, "discoURL": discoURL}
-		err = tmpl.ExecuteTemplate(w, "mindthegap", p)
+	cookieName := "mtg-" + ca
+	if _, ok := r.Form["entityID"]; ok {
+		entityIDJSON = r.Form.Get("entityIDJSON")
+		http.SetCookie(w, &http.Cookie{Name: cookieName, Value: base64.URLEncoding.EncodeToString([]byte(entityIDJSON)), Path: "/", Secure: true, HttpOnly: true, MaxAge: 34560000})
+		return
 	}
+	if tmp, err := r.Cookie(cookieName); err == nil {
+		if data, err := base64.StdEncoding.DecodeString(tmp.Value); err == nil {
+			entityIDJSON = string(data)
+			return entityIDJSON, err
+		}
+	}
+	return "", wasPassive
+}
+
+func mindthegapPassive(w http.ResponseWriter, r *http.Request, ca CaConfig) (err error) {
+    if ca.ClientID != "" {
+        return
+    }
+	if _, err = mindthegapCheckIDPName(w, r, ca.Id); err == nil {
+		return
+	}
+	discoURL := "https://wayf.wayf.dk/ds/?"
+	dsParams := url.Values{}
+	dsParams.Set("return", "https://"+r.Host+"/"+ca.Id)
+	dsParams.Set("entityID", Config.RelayingParty)
+	dsParams.Set("policy", "mindthegap,v2")
+	dsParams.Set("isPassive", "true")
+	dsParams.Set("return", "https://"+r.Host+"/"+ca.Id)
+	http.Redirect(w, r, discoURL+dsParams.Encode(), http.StatusFound)
+	return wasPassive
+}
+
+func mindthegap(w http.ResponseWriter, r *http.Request, ca CaConfig) (err error) {
+	if ca.ClientID != "" {
+		idpName = ca.Name
+		err = tmpl.ExecuteTemplate(w, "mindthegap", map[string]string{"idpName": idpName, "riURL": riURL})
+		return
+	}
+	entityIDJSON, _ := mindthegapCheckIDPName(w, r, ca.Id)
+	caURL := "https://" + r.Host + "/" + ca.Id
+	riURL := caURL + "/ri"
+	discoURL := "https://wayf.wayf.dk/ds/?"
+	idpName := "Access through your Institution"
+	dsParams := url.Values{}
+	dsParams.Set("return", caURL+"/mindthegap")
+	dsParams.Set("entityID", Config.RelayingParty)
+	dsParams.Set("policy", "mindthegap,v2")
+	idp := idprec{}
+	errr := json.Unmarshal([]byte(entityIDJSON), &idp)
+	if errr == nil && idp.EntityID != "" {
+		idpName = idp.DisplayNames["en"]
+		riURL += "?entityID=" + url.QueryEscape(idp.EntityID)
+		if _, ok := r.Form["entityID"]; ok {
+			http.Redirect(w, r, riURL, http.StatusFound)
+			return
+		}
+	} else {
+		riURL = discoURL + dsParams.Encode()
+	}
+	dsParams.Set("policy", "v2")
+	p := map[string]string{"idpName": idpName, "riURL": riURL, "discoURL": discoURL + dsParams.Encode()}
+	err = tmpl.ExecuteTemplate(w, "mindthegap", p)
 	return
 }
 
