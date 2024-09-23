@@ -358,14 +358,13 @@ func mindthegapPassive(w http.ResponseWriter, r *http.Request, ca CaConfig) (err
 }
 
 func mindthegap(w http.ResponseWriter, r *http.Request, ca CaConfig) (err error) {
+	caURL := "https://" + r.Host + "/" + ca.Id
+	riURL := caURL + "/ri"
 	if ca.ClientID != "" {
-		idpName = ca.Name
-		err = tmpl.ExecuteTemplate(w, "mindthegap", map[string]string{"idpName": idpName, "riURL": riURL})
+		err = tmpl.ExecuteTemplate(w, "mindthegap", map[string]string{"idpName": ca.Name, "riURL": riURL})
 		return
 	}
 	entityIDJSON, _ := mindthegapCheckIDPName(w, r, ca.Id)
-	caURL := "https://" + r.Host + "/" + ca.Id
-	riURL := caURL + "/ri"
 	discoURL := "https://wayf.wayf.dk/ds/?"
 	idpName := "Access through your Institution"
 	dsParams := url.Values{}
