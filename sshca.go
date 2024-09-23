@@ -95,16 +95,12 @@ var (
 	funcMap = template.FuncMap{
 		"PathEscape": url.PathEscape,
 	}
-
-	errWait    = errors.New("wait")
-	errTimeout = errors.New("timeout")
+	wasPassive           = errors.New("wasPassive")
 	ssoTTL, rendevouzTTL time.Duration
 )
 
 func Sshca() {
 	tmpl = template.Must(template.New("ca.template").Funcs(funcMap).Parse(Config.Template))
-	claims.ttl = Config.RendevousTTL * time.Second
-	Config.SshPort = Config.SshListenOn[strings.Index(Config.SshListenOn, ":")+1:]
 	ssoTTL, _ = time.ParseDuration(Config.SSOTTL)
 	rendevouzTTL, _ = time.ParseDuration(Config.RendevouzTTL)
 	claims.ttl = ssoTTL
