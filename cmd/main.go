@@ -17,7 +17,7 @@ func main() {
 		Template:                  tmpl,
 		Verification_uri_template: "http://localhost:2280/%s\n",
 		SSOTTL:                    "3m",
-		RendevousTTL:              "1m",
+		RendevouzTTL:              "1m",
 		SshListenOn:               "localhost:2221",
 		WebListenOn:               "localhost:2280",
 
