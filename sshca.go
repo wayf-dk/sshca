@@ -60,7 +60,7 @@ type (
 		WWW                       embed.FS
 		Template                  string
 		Verification_uri_template string
-		RendevousTTL              time.Duration
+		SSOTTL, RendevouzTTL      string
 		SshPort                   string
 		SshListenOn               string
 		WebListenOn               string
@@ -93,12 +93,16 @@ var (
 
 	errWait    = errors.New("wait")
 	errTimeout = errors.New("timeout")
+	ssoTTL, rendevouzTTL time.Duration
 )
 
 func Sshca() {
 	tmpl = template.Must(template.New("ca.template").Funcs(funcMap).Parse(Config.Template))
 	claims.ttl = Config.RendevousTTL * time.Second
 	Config.SshPort = Config.SshListenOn[strings.Index(Config.SshListenOn, ":")+1:]
+	ssoTTL, _ = time.ParseDuration(Config.SSOTTL)
+	rendevouzTTL, _ = time.ParseDuration(Config.RendevouzTTL)
+	claims.ttl = ssoTTL
 	claims.cleanUp()
 	prepareCAs()
 	go sshserver()
@@ -244,6 +248,7 @@ func ssoHandler(w http.ResponseWriter, r *http.Request) (err error) {
 				return fmt.Errorf("no valid AuthnContextClassRef found: %v vs. %v", wantedAcrs, acrs)
 			}
 			ci.username = usernameFromPrincipal(ci.principal, ca)
+			ci.eol = time.Now().Add(rendevouzTTL)
 			claims.set(token, ci)
 			err = tmpl.ExecuteTemplate(w, "login", map[string]any{"ci": ci, "ca": ca, "token": token, "sshport": Config.SshPort})
 		}
@@ -600,7 +605,7 @@ type (
 )
 
 func (rv *rendezvous) cleanUp() {
-	ticker := time.NewTicker(Config.RendevousTTL * time.Second)
+	ticker := time.NewTicker(rv.ttl)
 	go func() {
 		for {
 			<-ticker.C
