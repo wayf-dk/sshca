@@ -141,14 +141,20 @@ func sshcaRouter(w http.ResponseWriter, r *http.Request) (err error) {
 			case "sign":
 				return sshsignHandler(w, r)
 			case "mindthegap":
-				return mindthegap(w, r, ca)
+				http.ServeFileFS(w, r, Config.WWW, "/www/mindthegap.html")
+				return
+				//	return mindthegap(w, r, ca)
 			case "ri":
 				return riHandler(w, r, ca)
 			default:
-    			if err = mindthegapPassive(w, r, ca); err != nil {
-    			    return
-    			}
-				err = tmpl.ExecuteTemplate(w, "login", map[string]any{"ca": ca})
+				if err = mindthegapPassive(w, r, ca); err != nil {
+					return
+				}
+				op := ""
+				if ca.ClientID != "" {
+                    op = ca.Name
+				}
+				err = tmpl.ExecuteTemplate(w, "login", map[string]any{"ca": ca, "op": op, "rp": Config.RelayingParty, "ri": "//" + r.Host + "/" + ca.Id + "/ri"})
 				return
 			}
 		}
@@ -219,7 +225,7 @@ func (fn appHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func riHandler(w http.ResponseWriter, r *http.Request, ca CaConfig) (err error) {
 	r.ParseForm()
 	if ca.ClientID != "" {
-		err = deviceflowHandler(w, ca)
+		err = deviceflowHandler(w, r, ca)
 		return
 	}
 	token := claims.set("", certInfo{ca: ca.Id})
@@ -252,7 +258,7 @@ func ssoHandler(w http.ResponseWriter, r *http.Request) (err error) {
 			ci.username = usernameFromPrincipal(ci.principal, ca)
 			ci.eol = time.Now().Add(rendevouzTTL)
 			claims.set(token, ci)
-			err = tmpl.ExecuteTemplate(w, "login", map[string]any{"ci": ci, "ca": ca, "state": token, "sshport": Config.SshPort})
+			err = tmpl.ExecuteTemplate(w, "login", map[string]any{"ci": ci, "ca": ca, "state": token, "sshport": Config.SshPort, "rp": Config.RelayingParty, "ri": "//" + r.Host + "/" + ca.Id + "/ri"})
 		}
 	}
 	return
@@ -324,10 +330,10 @@ func sshsignHandler(w http.ResponseWriter, r *http.Request) (err error) {
 
 func mindthegapCheckIDPName(w http.ResponseWriter, r *http.Request, ca string) (entityIDJSON string, err error) {
 	r.ParseForm()
-	cookieName := "mtg-" + ca
+	cookieName := "mindthegap"
 	if _, ok := r.Form["entityID"]; ok {
 		entityIDJSON = r.Form.Get("entityIDJSON")
-		http.SetCookie(w, &http.Cookie{Name: cookieName, Value: base64.URLEncoding.EncodeToString([]byte(entityIDJSON)), Path: "/", Secure: true, HttpOnly: true, MaxAge: 34560000})
+		http.SetCookie(w, &http.Cookie{Name: cookieName, Value: base64.URLEncoding.EncodeToString([]byte(entityIDJSON)), Path: "/"+ca, Secure: true, MaxAge: 34560000})
 		return
 	}
 	if tmp, err := r.Cookie(cookieName); err == nil {
@@ -340,9 +346,9 @@ func mindthegapCheckIDPName(w http.ResponseWriter, r *http.Request, ca string) (
 }
 
 func mindthegapPassive(w http.ResponseWriter, r *http.Request, ca CaConfig) (err error) {
-    if ca.ClientID != ""  || ca.Fake {
-        return
-    }
+	if ca.ClientID != "" || ca.Fake {
+		return
+	}
 	if _, err = mindthegapCheckIDPName(w, r, ca.Id); err == nil {
 		return
 	}
