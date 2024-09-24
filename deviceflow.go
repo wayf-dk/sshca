@@ -9,25 +9,25 @@ import (
 	"time"
 )
 
-func deviceflowHandler(w http.ResponseWriter, caConfig CaConfig) (err error) {
-	token := claims.set("", certInfo{ca: caConfig.Id})
-	resp, err := device_authorization_request(caConfig.ClientID, caConfig.Op.Device_authorization)
+func deviceflowHandler(w http.ResponseWriter, r *http.Request, ca CaConfig) (err error) {
+	token := claims.set("", certInfo{ca: ca.Id})
+	resp, err := device_authorization_request(ca.ClientID, ca.Op.Device_authorization)
 	if err != nil {
 		return
 	}
-   	tmpl.ExecuteTemplate(w, "login", map[string]any{"ca": caConfig, "token": token, "sshport": Config.SshPort, "verification_uri": resp["verification_uri_complete"].(string)})
+	tmpl.ExecuteTemplate(w, "login", map[string]any{"ca": ca, "state": token, "sshport": Config.SshPort, "verification_uri": resp["verification_uri_complete"].(string), "op": ca.Id, "rp": Config.RelayingParty, "ri": "//" + r.Host + "/" + ca.Id + "/ri"})
 	go func(token string) {
-		tokenResponse, _ := token_request(caConfig.ClientID, caConfig.Op.Token, resp["device_code"].(string))
+		tokenResponse, _ := token_request(ca.ClientID, ca.Op.Token, resp["device_code"].(string))
 		if tokenResponse != nil {
-			userInfo, err := getUserinfo(tokenResponse["access_token"].(string), caConfig.Op.Userinfo)
+			userInfo, err := getUserinfo(tokenResponse["access_token"].(string), ca.Op.Userinfo)
 			if err != nil {
 				return
 			}
-            val, ok := userInfo["sub"].(string)
-            if ok {
-                ci := certInfo{ca: caConfig.Id, principal: val, username: usernameFromPrincipal(val, caConfig)}
-                claims.set(token, ci)
-           }
+			val, ok := userInfo["sub"].(string)
+			if ok {
+				ci := certInfo{ca: ca.Id, principal: val, username: usernameFromPrincipal(val, ca), eol: time.Now().Add(rendevouzTTL)}
+				claims.set(token, ci)
+			}
 		}
 	}(token)
 	return
