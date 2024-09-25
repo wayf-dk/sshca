@@ -110,12 +110,16 @@ func Sshca() {
 	prepareCAs()
 	go sshserver()
 
-	http.Handle("/favicon.ico", http.NotFoundHandler())
+	http.HandleFunc("/favicon.ico", faviconHandler)
 	http.Handle("/", appHandler(sshcaRouter))
 
 	fmt.Println("Listening on port: " + Config.WebListenOn)
 	err := http.ListenAndServe(Config.WebListenOn, nil)
 	fmt.Println("err: ", err)
+}
+
+func faviconHandler(w http.ResponseWriter, r *http.Request) {
+	http.ServeFileFS(w, r, Config.WWW, "/www/favicon.ico")
 }
 
 func sshcaRouter(w http.ResponseWriter, r *http.Request) (err error) {
