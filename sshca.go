@@ -152,7 +152,7 @@ func sshcaRouter(w http.ResponseWriter, r *http.Request) (err error) {
 				}
 				op := ""
 				if ca.ClientID != "" {
-                    op = ca.Name
+					op = ca.Name
 				}
 				err = tmpl.ExecuteTemplate(w, "login", map[string]any{"ca": ca, "op": op, "rp": Config.RelayingParty, "ri": "//" + r.Host + "/" + ca.Id + "/ri"})
 				return
@@ -333,7 +333,7 @@ func mindthegapCheckIDPName(w http.ResponseWriter, r *http.Request, ca string) (
 	cookieName := "mindthegap"
 	if _, ok := r.Form["entityID"]; ok {
 		entityIDJSON = r.Form.Get("entityIDJSON")
-		http.SetCookie(w, &http.Cookie{Name: cookieName, Value: base64.URLEncoding.EncodeToString([]byte(entityIDJSON)), Path: "/"+ca, Secure: true, MaxAge: 34560000})
+		http.SetCookie(w, &http.Cookie{Name: cookieName, Value: base64.URLEncoding.EncodeToString([]byte(entityIDJSON)), Path: "/" + ca, Secure: true, MaxAge: 34560000})
 		return
 	}
 	if tmp, err := r.Cookie(cookieName); err == nil {
