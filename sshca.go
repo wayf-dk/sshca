@@ -56,21 +56,22 @@ type (
 	}
 
 	Conf struct {
-		RelayingParty             string
-		WWW                       embed.FS
-		Template                  string
-		Verification_uri_template string
-		SSOTTL, RendevouzTTL      string
-		SshPort                   string
-		SshListenOn               string
-		WebListenOn               string
-		Principal                 string
-		AuthnContextClassRef      string
-		Assurance                 string
-		CaConfigs                 map[string]CaConfig
-		Cryptokilib               string
-		Slot                      string
-		NoOfSessions              int
+		ServiceName, RelayingParty string
+		HostCertificatePrincipals  []string
+		WWW                        embed.FS
+		Template                   string
+		Verification_uri_template  string
+		SSOTTL, RendevouzTTL       string
+		SshPort                    string
+		SshListenOn                string
+		WebListenOn                string
+		Principal                  string
+		AuthnContextClassRef       string
+		Assurance                  string
+		CaConfigs                  map[string]CaConfig
+		Cryptokilib                string
+		Slot                       string
+		NoOfSessions               int
 	}
 
 	idprec struct {
@@ -416,8 +417,12 @@ func sshserver() {
 			return permissions, nil
 		},
 	}
-
-	sshConfig.AddHostKey(Config.CaConfigs["transport"].Signer)
+	hostSigner, err := newHostSigner(Config.CaConfigs["transport"].Signer, Config.ServiceName, Config.HostCertificatePrincipals)
+	if err != nil {
+		log.Fatal("failed to create hostSigner: ", err)
+	}
+	sshConfig.AddHostKey(hostSigner)
+	//	sshConfig.AddHostKey(Config.CaConfigs["transport"].Signer)
 
 	// Once a ServerConfig has been configured, connections can be
 	// accepted.
@@ -495,6 +500,21 @@ func handleSSHConnection(nConn net.Conn, sshConfig *ssh.ServerConfig) {
 		}
 	}
 	conn.Close()
+}
+
+func newHostSigner(signer ssh.Signer, keyId string, principals []string) (hostSigner ssh.Signer, err error) {
+	now := time.Now().In(time.FixedZone("UTC", 0)).Unix()
+	cert := &ssh.Certificate{
+		CertType:        ssh.HostCert,
+		Key:             signer.PublicKey(),
+		KeyId:           keyId,
+		ValidPrincipals: principals,
+		ValidAfter:      uint64(now - 60),
+		ValidBefore:     uint64(now + 31556926),
+	}
+	err = cert.SignCert(rand.Reader, signer)
+	fmt.Println(string(certPP(cert, "")))
+	return ssh.NewCertSigner(cert, signer)
 }
 
 func demoCert(channel ssh.Channel, publicKey ssh.PublicKey) {
