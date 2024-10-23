@@ -21,12 +21,8 @@ Web first:
 6. The SSH certificate is sent down the SSH connection and put in an appropriate place
 
 Shell first - using a simple shell function:
-1. Establish a SSH connection to the service
-2. The service creates the token and it is sent back to the shell as part of an url pointing to the web side of the service
-3. The url is either auto opened or just echoed so that it can be clicked on or copied and pasted into a browser
-4. The browser finishes the web login
-5. The service creates a certificate based on the user info from the web login that the token gives access to and the SSH public key from the still open SSH connection
-6. The SSH certificate is sent down the SSH connection and put in an appropriate place
+
+This way of operation has been removed due to risk of CSRF attacks.
 
 ## Running the demo
 Running as a production service requires access to a HSM to secure the private keys for the SSH certificate authorities, but it is possible to kick the tires by running this repo in demo mode. As the web api requires access to a real OP and some additional configuration the demo currently only shows the SSH method.
