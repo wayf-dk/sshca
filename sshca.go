@@ -44,22 +44,22 @@ type (
 	}
 
 	CaConfig struct {
-		Fake, Hide                              bool
-		Id, Name, PublicKey                     string
-		ClientID, ConfigEndpoint, SSHTemplate   string
-		Settings                                Settings
-		DefaultPrincipals, AuthnContextClassRef []string
-		HashedPrincipal                         bool
-		MyAccessID                              bool
-		Op                                      Opconfig   `json:"-"`
-		Signer                                  ssh.Signer `json:"-"`
+		Fake, Hide                                          bool
+		Id, Name, PublicKey                                 string
+		ClientID, ConfigEndpoint, SSHTemplate, HTMLTemplate string
+		Settings                                            Settings
+		DefaultPrincipals, AuthnContextClassRef             []string
+		HashedPrincipal                                     bool
+		MyAccessID                                          bool
+		Op                                                  Opconfig   `json:"-"`
+		Signer                                              ssh.Signer `json:"-"`
 	}
 
 	Conf struct {
 		ServiceName, RelayingParty string
 		HostCertificatePrincipals  []string
 		WWW                        embed.FS
-		Template                   string
+		Template, HTMLTemplate     string
 		Verification_uri_template  string
 		SSOTTL, RendevouzTTL       string
 		SshPort                    string
