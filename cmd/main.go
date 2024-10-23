@@ -15,6 +15,7 @@ func main() {
 
 	sshca.Config = sshca.Conf{
 		Template:                  tmpl,
+		HTMLTemplate:              "login",
 		Verification_uri_template: "http://localhost:2280/%s\n",
 		SSOTTL:                    "3m",
 		RendevouzTTL:              "1m",
