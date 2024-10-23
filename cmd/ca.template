@@ -91,7 +91,7 @@ function setCurl() {
 
     if (t) {
         const host = window.location.hostname
-        const getCertCmd = `ssh -p ${sshport} ${window.location.hostname} token ${t}  > ~/.ssh/id_ed25519-cert.pub`
+        const getCertCmd = `ssh -p ${sshport} ${window.location.hostname} token ${t}  > ~/.ssh/ssh-ca-demo-cert.pub`
         const curl = document.querySelector('#curl')
 
         feedback = new EventSource(`/feedback/${t}`)
