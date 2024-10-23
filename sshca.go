@@ -113,7 +113,7 @@ func Sshca() {
 	http.HandleFunc("/favicon.ico", faviconHandler)
 	http.Handle("/", appHandler(sshcaRouter))
 
-	fmt.Println("Listening on port: http://" + Config.WebListenOn)
+	fmt.Println("Listening on port: " + Config.WebListenOn)
 	err := http.ListenAndServe(Config.WebListenOn, nil)
 	fmt.Println("err: ", err)
 }
