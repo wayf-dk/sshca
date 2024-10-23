@@ -113,7 +113,7 @@ func Sshca() {
 	http.HandleFunc("/favicon.ico", faviconHandler)
 	http.Handle("/", appHandler(sshcaRouter))
 
-	fmt.Println("Listening on port: " + Config.WebListenOn)
+	fmt.Println("Listening on port: http://" + Config.WebListenOn)
 	err := http.ListenAndServe(Config.WebListenOn, nil)
 	fmt.Println("err: ", err)
 }
@@ -159,7 +159,7 @@ func sshcaRouter(w http.ResponseWriter, r *http.Request) (err error) {
 				if ca.ClientID != "" {
 					op = ca.Name
 				}
-				err = tmpl.ExecuteTemplate(w, "login", map[string]any{"ca": ca, "op": op, "rp": Config.RelayingParty, "ri": "//" + r.Host + "/" + ca.Id + "/ri"})
+				err = tmpl.ExecuteTemplate(w, ca.HTMLTemplate, map[string]any{"ca": ca, "op": op, "rp": Config.RelayingParty, "ri": "//" + r.Host + "/" + ca.Id + "/ri"})
 				return
 			}
 		}
@@ -263,7 +263,7 @@ func ssoHandler(w http.ResponseWriter, r *http.Request) (err error) {
 			ci.username = usernameFromPrincipal(ci.principal, ca)
 			ci.eol = time.Now().Add(rendevouzTTL)
 			claims.set(token, ci)
-			err = tmpl.ExecuteTemplate(w, "login", map[string]any{"ci": ci, "ca": ca, "state": token, "sshport": Config.SshPort, "rp": Config.RelayingParty, "ri": "//" + r.Host + "/" + ca.Id + "/ri"})
+			err = tmpl.ExecuteTemplate(w, ca.HTMLTemplate, map[string]any{"ci": ci, "ca": ca, "state": token, "sshport": Config.SshPort, "rp": Config.RelayingParty, "ri": "//" + r.Host + "/" + ca.Id + "/ri"})
 		}
 	}
 	return
