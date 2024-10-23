@@ -186,6 +186,9 @@ func prepareCAs() {
 				}
 			}
 		}
+		if v.HTMLTemplate == "" {
+		    v.HTMLTemplate = Config.HTMLTemplate
+		}
 		v.Id = i
 		Config.CaConfigs[i] = v
 	}
