@@ -520,7 +520,6 @@ func newHostSigner(signer ssh.Signer, keyId string, principals []string) (hostSi
 		ValidBefore:     uint64(now + 31556926),
 	}
 	err = cert.SignCert(rand.Reader, signer)
-	fmt.Println(string(certPP(cert, "")))
 	return ssh.NewCertSigner(cert, signer)
 }
 
