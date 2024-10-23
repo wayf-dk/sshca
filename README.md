@@ -40,6 +40,6 @@ So clone the repo and:
 - open [http://localhost:2280](http://localhost:2280) in a browser
 - choose "Demo CA"
 - click "Login with a fake principal"
-- copy the ssh command and run it in a shell - be aware that it will overwrite ~/.ssh/id_ed25519-cert.pub
+- copy the ssh command and run it in a shell
 - the browser will show a dump of the downloaded certificate as feedback
-- run: `ssh -p 2221 -o CertificateFile=~/.ssh/id_ed25519-cert.pub demo@localhost demo` to se a dump of the certificate your SSH client would use if you tried to log in to a SSH server that required a ed25519 SSH certificate.
+- run: `ssh -p 2221 -o CertificateFile=~/.ssh/ssh-ca-demo-cert.pub demo@localhost demo` to se a dump of the certificate your SSH client would use if you tried to log in to a SSH server that required a ed25519 SSH certificate.
