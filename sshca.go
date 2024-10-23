@@ -437,7 +437,7 @@ func sshserver() {
 	if err != nil {
 		log.Fatal("failed to listen for connection: ", err)
 	}
-	fmt.Println("listening on " + Config.SshListenOn)
+	fmt.Println("ssh listening on " + Config.SshListenOn)
 
 	for {
 		nConn, err := listener.Accept()
