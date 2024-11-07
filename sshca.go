@@ -600,7 +600,7 @@ func usernameFromPrincipal(principal string, ca CaConfig) (username string) {
 		return
 	}
 	if ca.MyAccessID {
-		username = strings.ReplaceAll(principal[:35], "-", "")
+		username = strings.ReplaceAll(principal[:36], "-", "")
 		return
 	}
 	return
