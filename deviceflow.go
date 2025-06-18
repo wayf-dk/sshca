@@ -3,31 +3,30 @@ package sshca
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 )
 
-func deviceflowHandler(w http.ResponseWriter, r *http.Request, ca CaConfig) (err error) {
-	token := claims.set("", certInfo{ca: ca.Id})
+func deviceflowHandler(w http.ResponseWriter, r *http.Request, token string, ca CaConfig, ci certInfo) (err error) {
 	resp, err := device_authorization_request(ca.ClientID, ca.Op.Device_authorization)
 	if err != nil {
 		return
 	}
-	tmpl.ExecuteTemplate(w, ca.HTMLTemplate, map[string]any{"ca": ca, "state": token, "sshport": Config.SshPort, "verification_uri": resp["verification_uri_complete"].(string), "op": ca.Id, "rp": Config.RelayingParty, "ri": "//" + r.Host + "/" + ca.Id + "/ri"})
-	go func(token string) {
-		tokenResponse, _ := token_request(ca.ClientID, ca.Op.Token, resp["device_code"].(string))
+   	tmpl.ExecuteTemplate(w, "deviceflow", map[string]any{"state": token, "verification_uri": resp["verification_uri_complete"].(string)})
+    	go func(token string) {
+		tokenResponse, _ := token_request(ca, resp["device_code"].(string))
 		if tokenResponse != nil {
-			userInfo, err := getUserinfo(tokenResponse["access_token"].(string), ca.Op.Userinfo)
-			if err != nil {
-				return
-			}
-			val, ok := userInfo["sub"].(string)
-			if ok {
-				ci := certInfo{ca: ca.Id, principal: val, username: usernameFromPrincipal(val, ca), eol: time.Now().Add(rendevouzTTL)}
-				claims.set(token, ci)
-			}
+            resp, err := introspect(tokenResponse["access_token"].(string), ca)
+            if err != nil {
+                return
+            }
+            if val, ok := resp["sub"].(string); ok {
+                setPrincipal(token, val)
+            }
 		}
 	}(token)
 	return
@@ -50,16 +49,16 @@ func device_authorization_request(clientID, device_authorization string) (res ma
 	return
 }
 
-func token_request(clientID, token, device_code string) (res map[string]any, err error) {
+func token_request(ca CaConfig, device_code string) (res map[string]any, err error) {
 	v := url.Values{}
 	v.Set("grant_type", "urn:ietf:params:oauth:grant-type:device_code")
 	v.Set("device_code", device_code)
-	v.Set("client_id", clientID)
+	v.Set("client_id", ca.ClientID)
 	tries := 10
 	timeout := 2 * time.Second
 	for tries > 0 {
 		tries--
-		resp, err := client.PostForm(token, v)
+		resp, err := client.PostForm(ca.Op.Token, v)
 		if err != nil {
 			return nil, err
 		} else if 200 <= resp.StatusCode && resp.StatusCode < 300 {
@@ -75,10 +74,15 @@ func token_request(clientID, token, device_code string) (res map[string]any, err
 	return nil, errors.New("")
 }
 
-func getUserinfo(token, endpoint string) (res map[string]any, err error) {
-	request, _ := http.NewRequest("POST", endpoint, nil)
+func introspect(token string, ca CaConfig) (res map[string]any, err error) {
+    data := url.Values{}
+    data.Set("token", token)
+    data.Set("client_id", ca.IntroSpectClientID)
+    data.Set("client_secret", ca.IntroSpectClientSecret)
+
+	request, _ := http.NewRequest("POST", ca.Op.Introspect, strings.NewReader(data.Encode()))
 	request.Header.Add("Content-Type", "application/x-www-form-urlencoded")
-	request.Header.Add("Authorization", "Bearer "+token)
+
 	resp, err := client.Do(request)
 	if err != nil {
 		return
@@ -88,7 +92,8 @@ func getUserinfo(token, endpoint string) (res map[string]any, err error) {
 	if err != nil {
 		return
 	}
+	fmt.Println("body", string(responsebody))
 	res = map[string]any{}
-	json.Unmarshal(responsebody, &res)
+	err = json.Unmarshal(responsebody, &res)
 	return
 }
