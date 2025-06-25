@@ -3,11 +3,9 @@ package sshca
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"net/url"
-	"strings"
 	"time"
 )
 
@@ -16,8 +14,8 @@ func deviceflowHandler(w http.ResponseWriter, r *http.Request, token string, ca 
 	if err != nil {
 		return
 	}
-   	tmpl.ExecuteTemplate(w, "deviceflow", map[string]any{"state": token, "verification_uri": resp["verification_uri_complete"].(string)})
-    	go func(token string) {
+    tmpl.ExecuteTemplate(w, "deviceflow", map[string]any{"state": token, "verification_uri": resp["verification_uri_complete"].(string)})
+    go func(token string) {
 		tokenResponse, _ := token_request(ca, resp["device_code"].(string))
 		if tokenResponse != nil {
             resp, err := introspect(tokenResponse["access_token"].(string), ca)
@@ -72,28 +70,4 @@ func token_request(ca CaConfig, device_code string) (res map[string]any, err err
 		}
 	}
 	return nil, errors.New("")
-}
-
-func introspect(token string, ca CaConfig) (res map[string]any, err error) {
-    data := url.Values{}
-    data.Set("token", token)
-    data.Set("client_id", ca.IntroSpectClientID)
-    data.Set("client_secret", ca.IntroSpectClientSecret)
-
-	request, _ := http.NewRequest("POST", ca.Op.Introspect, strings.NewReader(data.Encode()))
-	request.Header.Add("Content-Type", "application/x-www-form-urlencoded")
-
-	resp, err := client.Do(request)
-	if err != nil {
-		return
-	}
-	defer resp.Body.Close()
-	responsebody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return
-	}
-	fmt.Println("body", string(responsebody))
-	res = map[string]any{}
-	err = json.Unmarshal(responsebody, &res)
-	return
 }
