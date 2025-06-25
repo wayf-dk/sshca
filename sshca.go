@@ -338,6 +338,30 @@ func sshsignHandler(w http.ResponseWriter, r *http.Request) (err error) {
 	return
 }
 
+func introspect(token string, ca CaConfig) (res map[string]any, err error) {
+    data := url.Values{}
+    data.Set("token", token)
+    data.Set("client_id", ca.IntroSpectClientID)
+    data.Set("client_secret", ca.IntroSpectClientSecret)
+
+	request, _ := http.NewRequest("POST", ca.Op.Introspect, strings.NewReader(data.Encode()))
+	request.Header.Add("Content-Type", "application/x-www-form-urlencoded")
+
+	resp, err := client.Do(request)
+	if err != nil {
+		return
+	}
+	defer resp.Body.Close()
+	responsebody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return
+	}
+	fmt.Println("body", string(responsebody))
+	res = map[string]any{}
+	err = json.Unmarshal(responsebody, &res)
+	return
+}
+
 func mindthegapCheckIDPName(w http.ResponseWriter, r *http.Request, ca string) (entityIDJSON string, err error) {
 	r.ParseForm()
 	cookieName := "mindthegap"
