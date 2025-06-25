@@ -6,9 +6,9 @@ import (
 	"crypto/sha256"
 	"embed"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"html/template"
 	"io"
@@ -45,16 +45,16 @@ type (
 	}
 
 	CaConfig struct {
-		Fake, Hide                                          bool
-		Id, Name, PublicKey                                 string
+		Fake, Hide                                                                         bool
+		Id, Name, PublicKey                                                                string
 		ClientID, ClientSecret, ConfigEndpoint, IntroSpectClientID, IntroSpectClientSecret string
 		SSHTemplate, HTMLTemplate                                                          string
-		Settings                                            Settings
-		DefaultPrincipals, AuthnContextClassRef             []string
-		HashedPrincipal                                     bool
-		MyAccessID                                          bool
-		Op                                                  Opconfig   `json:"-"`
-		Signer                                              ssh.Signer `json:"-"`
+		Settings                                                                           Settings
+		DefaultPrincipals, AuthnContextClassRef                                            []string
+		HashedPrincipal                                                                    bool
+		MyAccessID                                                                         bool
+		Op                                                                                 Opconfig   `json:"-"`
+		Signer                                                                             ssh.Signer `json:"-"`
 	}
 
 	Conf struct {
@@ -83,7 +83,7 @@ type (
 )
 
 const (
-	sseRetry = 2000
+	sseRetry = 1000
 )
 
 var (
@@ -106,7 +106,7 @@ func Sshca() {
 	tmpl = template.Must(template.New("ca.template").Funcs(funcMap).Parse(Config.Template))
 	ssoTTL, _ = time.ParseDuration(Config.SSOTTL)
 	rendevouzTTL, _ = time.ParseDuration(Config.RendevouzTTL)
-	claims.ttl = ssoTTL
+	claims.ttl = rendevouzTTL
 	claims.cleanUp()
 	Config.SshPort = Config.SshListenOn[strings.Index(Config.SshListenOn, ":")+1:]
 	prepareCAs()
@@ -135,6 +135,10 @@ func sshcaRouter(w http.ResponseWriter, r *http.Request) (err error) {
 		return feedbackHandler(w, r)
 	case "sso": // returning from login
 		return ssoHandler(w, r)
+	case "pwdevice": // returning from login
+		return pwdeviceHandler(w, r)
+	case "pw": // returning from login
+		return pwHandler(w, r)
 	default:
 		ca, ok := Config.CaConfigs[p]
 		if ok { // handle /<ca>/.*
@@ -165,6 +169,9 @@ func sshcaRouter(w http.ResponseWriter, r *http.Request) (err error) {
 				return
 			}
 		}
+		if ci, ok := claims.get(p); ok { // see if it is a token
+			return tokenHandler(w, r, p, ci)
+		}
 		err = tmpl.ExecuteTemplate(w, "listCAs", map[string]any{"config": Config.CaConfigs})
 		return
 	}
@@ -189,7 +196,7 @@ func prepareCAs() {
 			}
 		}
 		if v.HTMLTemplate == "" {
-		    v.HTMLTemplate = Config.HTMLTemplate
+			v.HTMLTemplate = Config.HTMLTemplate
 		}
 		v.Id = i
 		Config.CaConfigs[i] = v
@@ -234,14 +241,37 @@ func (fn appHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func riHandler(w http.ResponseWriter, r *http.Request, ca CaConfig) (err error) {
 	r.ParseForm()
+	token := claims.set("", certInfo{ca: ca.Id, eol: time.Now().Add(ssoTTL)})
 	if ca.ClientID != "" {
-		err = deviceflowHandler(w, r, ca)
+		err = deviceflowHandler(w, r, token, ca, certInfo{})
 		return
 	}
-	token := claims.set("", certInfo{ca: ca.Id})
 	data := url.Values{}
 	data.Set("state", token)
-	data.Set("idpentityid", r.Form.Get("entityID"))
+	if idp := r.Form.Get("entityID"); idp != "" {
+	    data.Set("idpentityid", idp)
+	}
+	if len(ca.AuthnContextClassRef) > 0 {
+		data.Set("acr_values", strings.Join(ca.AuthnContextClassRef, " "))
+	}
+	http.Redirect(w, r, "/sso?"+data.Encode(), http.StatusFound)
+	return
+}
+
+func tokenHandler(w http.ResponseWriter, r *http.Request, token string, ci certInfo) (err error) {
+	ca := Config.CaConfigs[ci.ca]
+	fmt.Printf("tokenhandler: %#v %#v\n", ci, ca)
+	if ca.ClientID != "" {
+		err = deviceflowHandler(w, r, token, ca, ci)
+		return
+	}
+	ci.eol = time.Now().Add(ssoTTL)
+	claims.set(token, ci)
+	data := url.Values{}
+	data.Set("state", token)
+	if ci.idp != "" {
+    	data.Set("idpentityid", ci.idp)
+    }
 	if len(ca.AuthnContextClassRef) > 0 {
 		data.Set("acr_values", strings.Join(ca.AuthnContextClassRef, " "))
 	}
@@ -252,50 +282,97 @@ func riHandler(w http.ResponseWriter, r *http.Request, ca CaConfig) (err error) 
 func ssoHandler(w http.ResponseWriter, r *http.Request) (err error) {
 	r.ParseForm()
 	token := r.Form.Get("state")
-	if ci, ok := claims.get(token); ok { // see if it is a token
-		ci.principal = r.Header.Get(Config.Principal)
-		ca := Config.CaConfigs[ci.ca]
-		if ca.Fake {
-			ci.principal = "a_really_fake_principal"
-		}
-		if ci.principal != "" {
-			wantedAcrs := ca.AuthnContextClassRef
-			acrs := strings.Split(r.Header.Get(Config.AuthnContextClassRef), ",")
-			acrs = append(acrs, strings.Split(r.Header.Get(Config.Assurance), ",")...)
-			if len(wantedAcrs) > 0 && intersectionEmpty(wantedAcrs, acrs) {
-				return fmt.Errorf("no valid AuthnContextClassRef found: %v vs. %v", wantedAcrs, acrs)
-			}
-			ci.username = usernameFromPrincipal(ci.principal, ca)
-			ci.eol = time.Now().Add(rendevouzTTL)
-			claims.set(token, ci)
-			err = tmpl.ExecuteTemplate(w, ca.HTMLTemplate, map[string]any{"ci": ci, "ca": ca, "state": token, "sshport": Config.SshPort, "rp": Config.RelayingParty, "ri": "//" + r.Host + "/" + ca.Id + "/ri"})
-		}
+	ci, ok := claims.get(token)
+	if ok {
+		ci = setPrincipal(token, r.Header.Get(Config.Principal))
+		return ssoFinalize(w, r, token, ci)
 	}
+	return
+}
+
+func pwdeviceHandler(w http.ResponseWriter, r *http.Request) (err error) {
+	r.ParseForm()
+	token := r.Form.Get("state")
+	if ci, ok := claims.wait(token, p2); ok {
+		return ssoFinalize(w, r, token, ci)
+	}
+	return
+}
+
+func setPrincipal(token, principal string) (ci certInfo) {
+	ci, ok := claims.get(token)
+	if ok {
+		ca := Config.CaConfigs[ci.ca]
+		ci.principal = principal
+		ci.username = usernameFromPrincipal(principal, ca)
+		ci.eol = time.Now().Add(rendevouzTTL)
+		claims.set(token, ci)
+	}
+	return
+}
+
+func ssoFinalize(w http.ResponseWriter, r *http.Request, token string, ci certInfo) (err error) {
+	ca := Config.CaConfigs[ci.ca]
+	if ca.Fake {
+		ci.principal = "a_really_fake_principal"
+	}
+	if ci.principal != "" {
+		wantedAcrs := ca.AuthnContextClassRef
+		acrs := strings.Split(r.Header.Get(Config.AuthnContextClassRef), ",")
+		acrs = append(acrs, strings.Split(r.Header.Get(Config.Assurance), ",")...)
+		if len(wantedAcrs) > 0 && intersectionEmpty(wantedAcrs, acrs) {
+			return fmt.Errorf("no valid AuthnContextClassRef found: %v vs. %v", wantedAcrs, acrs)
+		}
+		if ci.pw != "" {
+			if tmp, err := r.Cookie("pw"); err != nil || tmp.Value != ci.pw {
+				err = tmpl.ExecuteTemplate(w, "pw", map[string]any{"token": token})
+				return err
+			}
+			ci.pw = ""
+			claims.set(token, ci)
+			err = tmpl.ExecuteTemplate(w, "certificate", map[string]any{"token": token})
+			return
+		}
+		err = tmpl.ExecuteTemplate(w, ca.HTMLTemplate, map[string]any{"ci": ci, "ca": ca, "state": token, "sshport": Config.SshPort, "rp": Config.RelayingParty, "ri": "//" + r.Host + "/" + ca.Id + "/ri"})
+	}
+	return
+}
+
+func pwHandler(w http.ResponseWriter, r *http.Request) (err error) {
+	path := strings.Split(r.URL.Path+"//", "/")
+	token := path[2]
+	defer r.Body.Close()
+	r.ParseForm()
+	if ci, ok := claims.get(token); ok && ci.pw == r.Form.Get("pw") {
+		http.SetCookie(w, &http.Cookie{Name: "pw", Value: ci.pw, Path: "/", Secure: true, HttpOnly: true, MaxAge: 86400, SameSite: http.SameSiteNoneMode})
+		ci.pw = ""
+		claims.set(token, ci)
+		err = tmpl.ExecuteTemplate(w, "certificate", map[string]any{"token": token})
+		return
+	}
+	err = tmpl.ExecuteTemplate(w, "pw", map[string]any{"token": token})
 	return
 }
 
 func feedbackHandler(w http.ResponseWriter, r *http.Request) (err error) {
 	path := strings.Split(r.URL.Path+"//", "/")
 	token := path[2]
-	ci, ok := claims.get(token)
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 
-	if ok && ci.cert != nil {
-		fmt.Fprintf(w, "event: certready\n%s\n\n", certPP(ci.cert, "data: "))
-		return nil
+	ci, ok := claims.wait(token, principal)
+	fmt.Println("feedback", ok)
+	if !ok {
+        http.Error(w, "StatusServiceUnavailable", 503)
+		return
 	}
-	if ok && ci.principal != "" {
-		fmt.Fprintf(w, "event: cmdready\ndata: %s\nretry: %d\n\n", ci.username, sseRetry)
-		return nil
+	fmt.Fprintf(w, "event: cmdready\ndata: %s\n\n", ci.username)
+	if ci, ok = claims.wait(token, certificate); !ok {
+		return
 	}
-	if ok {
-		fmt.Fprintf(w, "data: wait\nretry: %d\n\n", sseRetry)
-		return nil
-	}
-	fmt.Fprintf(w, "event: timeout\ndata: %s\n\n", "timeout")
-	return nil
+	fmt.Fprintf(w, "event: certready\n%s\n\n", certPP(ci.cert, "data: "))
+	return
 }
 
 func sshsignHandler(w http.ResponseWriter, r *http.Request) (err error) {
@@ -317,11 +394,13 @@ func sshsignHandler(w http.ResponseWriter, r *http.Request) (err error) {
 	if err != nil {
 		return
 	}
-	resp, err := getUserinfo(params["OTT"], config.Op.Userinfo)
+
+	resp, err := introspect(params["OTT"], config)
 	if err != nil {
 		return
 	}
 
+	fmt.Println("resp", resp)
 	val, ok := resp["sub"].(string)
 	if !ok {
 		return fmt.Errorf("sub not found: %s", ca)
@@ -487,6 +566,7 @@ func handleSSHConnection(nConn net.Conn, sshConfig *ssh.ServerConfig) {
 		log.Println("failed to handshake: ", err)
 		return
 	}
+	defer conn.Close()
 
 	xtras := conn.Permissions.Extensions
 	publicKey, _ := ssh.ParsePublicKey([]byte(xtras["pubkey"]))
@@ -512,19 +592,42 @@ func handleSSHConnection(nConn net.Conn, sshConfig *ssh.ServerConfig) {
 				args := strings.Split(string(req.Payload[4:])+"  ", " ") // always at least 2 elements
 				cmd, token := args[0], args[1]
 				switch cmd {
-				case "token":
-					ci, ok := claims.get(token)
-					if ok && user != "" && ci.cert == nil {
-						cert, err := newCertificate(Config.CaConfigs[ci.ca], publicKey, ci)
-						if err == nil {
-							certTxt := ssh.MarshalAuthorizedKey(cert)
-							fmt.Fprintf(channel, "%s", certTxt)
-							ci.cert = cert
-							claims.set(token, ci)
-						}
-					}
 				case "demo":
 					demoCert(channel, publicKey)
+					channel.Close()
+					return
+				case "ca":
+					f1 := flag.NewFlagSet("", flag.ExitOnError)
+					ca := f1.String("ca", "", "")
+					idp := f1.String("idp", "", "")
+					pw := f1.String("pw", "", "")
+					f1.Parse(args[1:])
+
+					_, ok := Config.CaConfigs[*ca]
+					if *ca != "" && !ok {
+						io.WriteString(channel, "unknown ca\n")
+						channel.Close()
+						return
+
+					}
+//					if len(*pw) < 6 {
+//						io.WriteString(channel, "pw to short\n")
+//						channel.Close()
+//						return
+//					}
+					token = claims.set("", certInfo{ca: *ca, idp: *idp, pw: *pw, eol: time.Now().Add(rendevouzTTL)})
+					io.WriteString(channel, fmt.Sprintf(Config.Verification_uri_template, token))
+				case "token": // fall thru below code common to ca and token
+				}
+				ci, ok := claims.wait(token, principal)
+				if ok && user != "" && ci.cert == nil {
+					cert, err := newCertificate(Config.CaConfigs[ci.ca], publicKey, ci)
+					if err == nil {
+						certTxt := ssh.MarshalAuthorizedKey(cert)
+						fmt.Fprintf(channel, "%s", certTxt)
+						ci.cert = cert
+						claims.set(token, ci)
+					}
 				}
 				channel.Close()
 			case "shell":
@@ -532,7 +635,6 @@ func handleSSHConnection(nConn net.Conn, sshConfig *ssh.ServerConfig) {
 			}
 		}
 	}
-	conn.Close()
 }
 
 func newHostSigner(signer ssh.Signer, keyId string, principals []string) (hostSigner ssh.Signer, err error) {
@@ -644,17 +746,6 @@ func certPP(cert *ssh.Certificate, prefix string) (pp []byte) {
 	return pp
 }
 
-// nonce
-func nonce() (s string) {
-	b := make([]byte, 8) // 64 bits
-	_, err := rand.Read(b)
-	if err != nil {
-		log.Panic("Problem with making random number:", err)
-	}
-	b[0] = b[0] & byte(0x7f) // make sure it is a positive number
-	return hex.EncodeToString(b)
-}
-
 // PP - super simple Pretty Print - using JSON
 func PP(i ...interface{}) {
 	for _, e := range i {
@@ -671,9 +762,17 @@ func PP(i ...interface{}) {
 
 // rendezvous
 
+const (
+	principal = iota
+	certificate
+	p2
+)
+
 type (
 	certInfo struct {
 		ca        string
+		idp       string
+		pw        string
 		principal string
 		username  string
 		cert      *ssh.Certificate
@@ -687,7 +786,7 @@ type (
 )
 
 func (rv *rendezvous) cleanUp() {
-	ticker := time.NewTicker(rv.ttl)
+	ticker := time.NewTicker(rendevouzTTL)
 	go func() {
 		for {
 			<-ticker.C
@@ -703,7 +802,7 @@ func (rv *rendezvous) cleanUp() {
 
 func (rv *rendezvous) set(token string, ci certInfo) string {
 	if token == "" {
-		token = nonce()
+		token = rand.Text()
 	}
 	if ci.eol.IsZero() {
 		ci.eol = time.Now().Add(rv.ttl)
@@ -722,6 +821,18 @@ func (rv *rendezvous) get(token string) (ci certInfo, ok bool) {
 		}
 	}
 	return
+}
+
+func (rv *rendezvous) wait(token string, cond int) (ci certInfo, ok bool) {
+	ticker := time.NewTicker(time.Second)
+	for {
+		ci, ok = rv.get(token)
+		fmt.Printf("ci %s %d %#v\n", token, cond, ci)
+		if !ok || (cond == principal && ci.principal != "" && ci.pw == "") || (cond == certificate && ci.cert != nil) || (cond == p2 && ci.principal != "" && ci.pw != "") {
+			return
+		}
+		<-ticker.C
+	}
 }
 
 // ssh-agent
