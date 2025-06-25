@@ -35,6 +35,7 @@ type (
 
 	Opconfig struct {
 		Userinfo             string `json:"userinfo_endpoint"`
+		Introspect           string `json:"introspection_endpoint"`
 		Device_authorization string `json:"device_authorization_endpoint"`
 		Token                string `json:"token_endpoint"`
 	}
@@ -46,7 +47,8 @@ type (
 	CaConfig struct {
 		Fake, Hide                                          bool
 		Id, Name, PublicKey                                 string
-		ClientID, ConfigEndpoint, SSHTemplate, HTMLTemplate string
+		ClientID, ClientSecret, ConfigEndpoint, IntroSpectClientID, IntroSpectClientSecret string
+		SSHTemplate, HTMLTemplate                                                          string
 		Settings                                            Settings
 		DefaultPrincipals, AuthnContextClassRef             []string
 		HashedPrincipal                                     bool
