@@ -283,7 +283,11 @@ func ssoHandler(w http.ResponseWriter, r *http.Request) (err error) {
 	token := r.Form.Get("state")
 	ci, ok := claims.get(token)
 	if ok {
-		ci = setPrincipal(token, r.Header.Get(Config.Principal))
+	    principal := r.Header.Get(Config.Principal)
+	    if Config.CaConfigs[ci.ca].Fake {
+	        principal = "a_really_fake_principal"
+	    }
+		ci = setPrincipal(token, principal)
 		return ssoFinalize(w, r, token, ci)
 	}
 	return
@@ -312,9 +316,6 @@ func setPrincipal(token, principal string) (ci certInfo) {
 
 func ssoFinalize(w http.ResponseWriter, r *http.Request, token string, ci certInfo) (err error) {
 	ca := Config.CaConfigs[ci.ca]
-	if ca.Fake {
-		ci.principal = "a_really_fake_principal"
-	}
 	if ci.principal != "" {
 		wantedAcrs := ca.AuthnContextClassRef
 		acrs := strings.Split(r.Header.Get(Config.AuthnContextClassRef), ",")
