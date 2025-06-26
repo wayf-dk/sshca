@@ -6,7 +6,7 @@ import (
 )
 
 var (
-    //go:embed ca.template
+	//go:embed ca.template
 	tmpl string
 )
 
@@ -24,20 +24,19 @@ func main() {
 
 		CaConfigs: map[string]sshca.CaConfig{
 			"demoCA": {
-			    Fake:      true,
-			    Name:      "Demo CA",
+				Fake:      true,
+				Name:      "Demo CA",
 				Signer:    signer,
 				PublicKey: publicKey,
-				Settings: sshca.Settings {
-    				Ttl:    36 * 3600,
+				Settings: sshca.Settings{
+					Ttl: 36 * 3600,
 				},
 			},
-            "transport": {
-                Signer: signer,
-            },
+			"transport": {
+				Signer: signer,
+			},
 		},
 	}
 
 	sshca.Sshca()
 }
-
