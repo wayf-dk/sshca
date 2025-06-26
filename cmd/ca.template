@@ -104,17 +104,11 @@ function setCurl() {
         feedback.addEventListener("cmdready", (e) => {
             document.querySelector('#username').innerText = e.data
             document.querySelector('#curl').innerText = getCertCmd
-            const sel = window.getSelection()
-            const range = document.createRange()
-            range.selectNodeContents(curl)
-            sel.removeAllRanges()
-            sel.addRange(range)
-       })
+        })
         feedback.addEventListener("certready", (e) => {
             document.querySelector('#cert').innerText = e.data
             document.querySelector('#manual').style.display = 'none'
             document.querySelector('#auto').style.display = 'block'
-            document.querySelector('#login').style.display = 'none'
             feedback.close()
         })
     } else {
