@@ -260,7 +260,6 @@ func riHandler(w http.ResponseWriter, r *http.Request, ca CaConfig) (err error) 
 
 func tokenHandler(w http.ResponseWriter, r *http.Request, token string, ci certInfo) (err error) {
 	ca := Config.CaConfigs[ci.ca]
-	fmt.Printf("tokenhandler: %#v %#v\n", ci, ca)
 	if ca.ClientID != "" {
 		err = deviceflowHandler(w, r, token, ca, ci)
 		return
@@ -362,12 +361,12 @@ func feedbackHandler(w http.ResponseWriter, r *http.Request) (err error) {
 	w.Header().Set("Cache-Control", "no-cache")
 
 	ci, ok := claims.wait(token, principal)
-	fmt.Println("feedback", ok)
 	if !ok {
         http.Error(w, "StatusServiceUnavailable", 503)
 		return
 	}
 	fmt.Fprintf(w, "event: cmdready\ndata: %s\n\n", ci.username)
+	w.(http.Flusher).Flush()
 	if ci, ok = claims.wait(token, certificate); !ok {
 		return
 	}
@@ -400,7 +399,6 @@ func sshsignHandler(w http.ResponseWriter, r *http.Request) (err error) {
 		return
 	}
 
-	fmt.Println("resp", resp)
 	val, ok := resp["sub"].(string)
 	if !ok {
 		return fmt.Errorf("sub not found: %s", ca)
@@ -435,7 +433,6 @@ func introspect(token string, ca CaConfig) (res map[string]any, err error) {
 	if err != nil {
 		return
 	}
-	fmt.Println("body", string(responsebody))
 	res = map[string]any{}
 	err = json.Unmarshal(responsebody, &res)
 	return
@@ -827,7 +824,6 @@ func (rv *rendezvous) wait(token string, cond int) (ci certInfo, ok bool) {
 	ticker := time.NewTicker(time.Second)
 	for {
 		ci, ok = rv.get(token)
-		fmt.Printf("ci %s %d %#v\n", token, cond, ci)
 		if !ok || (cond == principal && ci.principal != "" && ci.pw == "") || (cond == certificate && ci.cert != nil) || (cond == p2 && ci.principal != "" && ci.pw != "") {
 			return
 		}
