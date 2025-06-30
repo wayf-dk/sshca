@@ -296,7 +296,12 @@ func ssoHandler(w http.ResponseWriter, r *http.Request) (err error) {
 func pwdeviceHandler(w http.ResponseWriter, r *http.Request) (err error) {
 	r.ParseForm()
 	token := r.Form.Get("state")
-	if ci, ok := claims.wait(token, p2); ok {
+	waitfor := principal
+    if ci, ok := claims.get(token); ok && ci.pw != "" {
+        waitfor = principalAndPassword
+    }
+	if ci, ok := claims.wait(token, waitfor); ok {
+	    fmt.Println(ci, ok)
 		return ssoFinalize(w, r, token, ci)
 	}
 	return
@@ -763,7 +768,7 @@ func PP(i ...interface{}) {
 const (
 	principal = iota
 	certificate
-	p2
+	principalAndPassword
 )
 
 type (
@@ -825,7 +830,7 @@ func (rv *rendezvous) wait(token string, cond int) (ci certInfo, ok bool) {
 	ticker := time.NewTicker(time.Second)
 	for {
 		ci, ok = rv.get(token)
-		if !ok || (cond == principal && ci.principal != "" && ci.pw == "") || (cond == certificate && ci.cert != nil) || (cond == p2 && ci.principal != "" && ci.pw != "") {
+		if !ok || (cond == principal && ci.principal != "" && ci.pw == "") || (cond == certificate && ci.cert != nil) || (cond == principalAndPassword && ci.principal != "" && ci.pw != "") {
 			return
 		}
 		<-ticker.C
