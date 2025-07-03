@@ -435,12 +435,18 @@ func introspect(token string, ca CaConfig) (res map[string]any, err error) {
 		return
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, errors.New("Token introspection failed")
+	}
 	responsebody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return
 	}
 	res = map[string]any{}
 	err = json.Unmarshal(responsebody, &res)
+	if active, ok := res["active"].(bool); !ok || !active {
+		return nil, errors.New("Token is not active")
+	}
 	return
 }
 
