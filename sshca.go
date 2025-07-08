@@ -18,6 +18,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -38,10 +39,41 @@ type (
 		Introspect           string `json:"introspection_endpoint"`
 		Device_authorization string `json:"device_authorization_endpoint"`
 		Token                string `json:"token_endpoint"`
+		Issuer               string `json:"issuer"`
 	}
 
-	Settings struct {
-		Ttl int64
+	DeviceResponse struct {
+		Device_code               string        `json:"device_code"`
+		Expires_in                int64         `json:"expires"`
+		Interval                  time.Duration `json:"interval"`
+		User_code                 string        `json:"user_code"`
+		Verification_uri          string        `json:"verification_uri"`
+		Verification_uri_complete string        `json:"verification_uri_complete"`
+	}
+
+	TokenResponse struct {
+		Scope        string `json:"scope,omitempty"`
+		Access_token string `json:"access_token,omitempty"`
+		Id_token     string `json:"id_token,omitempty"`
+		TokenType    string `json:"token_type,omitempty"`
+		Expires_in   int64  `json:"expires_in"`
+	}
+
+	IntrospectionResponse struct {
+		Active    bool     `json:"active"`
+		Scope     string   `json:"scope,omitempty"`
+		Client_id string   `json:"client_id,omitempty"`
+		TokenType string   `json:"token_type,omitempty"`
+		Exp       int64    `json:"exp"`
+		Iat       int64    `json:"iat"`
+		Sub       string   `json:"sub,omitempty"`
+		Aud       []string `json:"aud,omitempty"`
+		Iss       string   `json:"iss,omitempty"`
+	}
+
+	CAParams struct {
+		Ttl         int64
+		Permissions ssh.Permissions
 	}
 
 	CaConfig struct {
@@ -49,12 +81,13 @@ type (
 		Id, Name, PublicKey                                                                string
 		ClientID, ClientSecret, ConfigEndpoint, IntroSpectClientID, IntroSpectClientSecret string
 		SSHTemplate, HTMLTemplate                                                          string
-		Settings                                                                           Settings
 		DefaultPrincipals, AuthnContextClassRef                                            []string
 		HashedPrincipal                                                                    bool
 		MyAccessID                                                                         bool
 		Op                                                                                 Opconfig   `json:"-"`
 		Signer                                                                             ssh.Signer `json:"-"`
+		CAParams                                                                           CAParams
+		ScopeCAParams                                                                      map[string]CAParams
 	}
 
 	Conf struct {
@@ -249,7 +282,7 @@ func riHandler(w http.ResponseWriter, r *http.Request, ca CaConfig) (err error) 
 	data := url.Values{}
 	data.Set("state", token)
 	if idp := r.Form.Get("entityID"); idp != "" {
-	    data.Set("idpentityid", idp)
+		data.Set("idpentityid", idp)
 	}
 	if len(ca.AuthnContextClassRef) > 0 {
 		data.Set("acr_values", strings.Join(ca.AuthnContextClassRef, " "))
@@ -269,8 +302,8 @@ func tokenHandler(w http.ResponseWriter, r *http.Request, token string, ci certI
 	data := url.Values{}
 	data.Set("state", token)
 	if ci.idp != "" {
-    	data.Set("idpentityid", ci.idp)
-    }
+		data.Set("idpentityid", ci.idp)
+	}
 	if len(ca.AuthnContextClassRef) > 0 {
 		data.Set("acr_values", strings.Join(ca.AuthnContextClassRef, " "))
 	}
@@ -283,10 +316,10 @@ func ssoHandler(w http.ResponseWriter, r *http.Request) (err error) {
 	token := r.Form.Get("state")
 	ci, ok := claims.get(token)
 	if ok {
-	    principal := r.Header.Get(Config.Principal)
-	    if Config.CaConfigs[ci.ca].Fake {
-	        principal = "a_really_fake_principal"
-	    }
+		principal := r.Header.Get(Config.Principal)
+		if Config.CaConfigs[ci.ca].Fake {
+			principal = "a_really_fake_principal"
+		}
 		ci = setPrincipal(token, principal)
 		return ssoFinalize(w, r, token, ci)
 	}
@@ -297,22 +330,51 @@ func pwdeviceHandler(w http.ResponseWriter, r *http.Request) (err error) {
 	r.ParseForm()
 	token := r.Form.Get("state")
 	waitfor := principal
-    if ci, ok := claims.get(token); ok && ci.pw != "" {
-        waitfor = principalAndPassword
-    }
+	if ci, ok := claims.get(token); ok && ci.pw != "" {
+		waitfor = principalAndPassword
+	}
 	if ci, ok := claims.wait(token, waitfor); ok {
-	    fmt.Println(ci, ok)
 		return ssoFinalize(w, r, token, ci)
 	}
 	return
+}
+
+func getMyAccssIdCertInfo(ci certInfo, res IntrospectionResponse) certInfo {
+	ci.principals = []string{res.Sub}
+	ci.params = Config.CaConfigs[ci.ca].CAParams
+	if scope := getEFPScope(res.Scope); scope != "" {
+		ci.principals = append(ci.principals, scope+"-"+res.Sub)
+		if params, ok := Config.CaConfigs[ci.ca].ScopeCAParams[scope]; ok {
+			ci.params = params
+		}
+	}
+	ci.eol = time.Now().Add(rendevouzTTL)
+	return ci
+}
+
+func getEFPScope(scopeList string) (res string) {
+	const pre = "urn:geant:efp.core.aai.geant.org:res:"
+	const cab = ":act:ssh"
+	scopes := strings.Split(scopeList, " ")
+	if i := slices.IndexFunc(scopes, func(s string) bool { return strings.HasPrefix(s, pre) }); i >= 0 {
+		if tmp, ok := strings.CutPrefix(scopes[i], pre); ok {
+			if tmp, ok := strings.CutSuffix(tmp, cab); ok {
+				return tmp
+			}
+		}
+	}
+	return res
 }
 
 func setPrincipal(token, principal string) (ci certInfo) {
 	ci, ok := claims.get(token)
 	if ok {
 		ca := Config.CaConfigs[ci.ca]
-		ci.principal = principal
-		ci.username = usernameFromPrincipal(principal, ca)
+		ci.principals = []string{principal}
+		if username := usernameFromPrincipal(principal, ca); username != "" {
+			ci.principals = append(ci.principals, username)
+		}
+		ci.params = ca.CAParams
 		ci.eol = time.Now().Add(rendevouzTTL)
 		claims.set(token, ci)
 	}
@@ -321,7 +383,7 @@ func setPrincipal(token, principal string) (ci certInfo) {
 
 func ssoFinalize(w http.ResponseWriter, r *http.Request, token string, ci certInfo) (err error) {
 	ca := Config.CaConfigs[ci.ca]
-	if ci.principal != "" {
+	if len(ci.principals) > 0 {
 		wantedAcrs := ca.AuthnContextClassRef
 		acrs := strings.Split(r.Header.Get(Config.AuthnContextClassRef), ",")
 		acrs = append(acrs, strings.Split(r.Header.Get(Config.Assurance), ",")...)
@@ -368,10 +430,9 @@ func feedbackHandler(w http.ResponseWriter, r *http.Request) (err error) {
 
 	ci, ok := claims.wait(token, principal)
 	if !ok {
-        http.Error(w, "StatusServiceUnavailable", 503)
+		http.Error(w, "StatusServiceUnavailable", 503)
 		return
 	}
-	fmt.Fprintf(w, "event: cmdready\ndata: %s\n\n", ci.username)
 	w.(http.Flusher).Flush()
 	if ci, ok = claims.wait(token, certificate); !ok {
 		return
@@ -381,6 +442,10 @@ func feedbackHandler(w http.ResponseWriter, r *http.Request) (err error) {
 }
 
 func sshsignHandler(w http.ResponseWriter, r *http.Request) (err error) {
+	params := struct {
+		PublicKey string // don't use []byte - will be json interpreted as base64
+		OTT       string
+	}{}
 	defer r.Body.Close()
 	r.ParseForm()
 	path := strings.Split(r.URL.Path, "/")
@@ -389,47 +454,41 @@ func sshsignHandler(w http.ResponseWriter, r *http.Request) (err error) {
 	if !ok {
 		return fmt.Errorf("CA not found: %s", ca)
 	}
-	params := map[string]string{}
 	req, _ := io.ReadAll(r.Body)
 	err = json.Unmarshal(req, &params)
 	if err != nil {
+		fmt.Println("err", err)
 		return
 	}
-	publicKey, _, _, _, err := ssh.ParseAuthorizedKey([]byte(params["PublicKey"]))
+	publicKey, _, _, _, err := ssh.ParseAuthorizedKey([]byte(params.PublicKey))
 	if err != nil {
 		return
 	}
 
-	resp, err := introspect(params["OTT"], config)
+	res, err := introspect(params.OTT, config)
 	if err != nil {
 		return
 	}
 
-	val, ok := resp["sub"].(string)
-	if !ok {
-		return fmt.Errorf("sub not found: %s", ca)
-	}
-
-	ci := certInfo{principal: val, username: usernameFromPrincipal(val, config)}
-
+	ci := getMyAccssIdCertInfo(certInfo{}, res)
 	sshCertificate, err := newCertificate(config, publicKey, ci)
 	if err != nil {
 		return
 	}
-	res := ssh.MarshalAuthorizedKey(sshCertificate)
-	w.Write(res)
+	cert := ssh.MarshalAuthorizedKey(sshCertificate)
+	w.Write(cert)
 	return
 }
 
-func introspect(token string, ca CaConfig) (res map[string]any, err error) {
-    data := url.Values{}
-    data.Set("token", token)
-    data.Set("client_id", ca.IntroSpectClientID)
-    data.Set("client_secret", ca.IntroSpectClientSecret)
+func introspect(token string, ca CaConfig) (res IntrospectionResponse, err error) {
+	data := url.Values{}
+	data.Set("token", token)
+	data.Set("client_id", ca.IntroSpectClientID)
+	data.Set("client_secret", ca.IntroSpectClientSecret)
+	data.Set("scope", "openid email profile eduperson_entitlement urn:geant:efp.core.aai.geant.org:res:it4i.cz:act:ssh")
 
 	request, _ := http.NewRequest("POST", ca.Op.Introspect, strings.NewReader(data.Encode()))
 	request.Header.Add("Content-Type", "application/x-www-form-urlencoded")
-
 	resp, err := client.Do(request)
 	if err != nil {
 		return
@@ -439,8 +498,29 @@ func introspect(token string, ca CaConfig) (res map[string]any, err error) {
 	if err != nil {
 		return
 	}
-	res = map[string]any{}
+
+	res = IntrospectionResponse{}
 	err = json.Unmarshal(responsebody, &res)
+	if err != nil {
+		return res, errors.New("json parsing error")
+	}
+
+	if slices.Index(res.Aud, ca.ClientID) < 0 {
+		return IntrospectionResponse{}, errors.New("aud mismatach")
+	}
+
+	if !res.Active {
+		return IntrospectionResponse{}, errors.New("inactive")
+	}
+
+	now := time.Now().Unix()
+	if res.Iat > now || res.Exp <= now {
+		return IntrospectionResponse{}, errors.New("token timeout")
+	}
+
+	if res.Iss != ca.Op.Issuer {
+		return IntrospectionResponse{}, errors.New("issuer mismatch")
+	}
 	return
 }
 
@@ -613,11 +693,11 @@ func handleSSHConnection(nConn net.Conn, sshConfig *ssh.ServerConfig) {
 						return
 
 					}
-//					if len(*pw) < 6 {
-//						io.WriteString(channel, "pw to short\n")
-//						channel.Close()
-//						return
-//					}
+					if len(*pw) < 6 {
+						io.WriteString(channel, "pw to short\n")
+						channel.Close()
+						return
+					}
 					token = claims.set("", certInfo{ca: *ca, idp: *idp, pw: *pw, eol: time.Now().Add(rendevouzTTL)})
 					io.WriteString(channel, fmt.Sprintf(Config.Verification_uri_template, token))
 				case "token": // fall thru below code common to ca and token
@@ -703,22 +783,14 @@ func newCertificate(ca CaConfig, pubkey ssh.PublicKey, ci certInfo) (cert *ssh.C
 	}
 
 	now := time.Now().In(time.FixedZone("UTC", 0)).Unix()
-	principals := []string{ci.principal}
-	if ci.username != "" {
-		principals = append(principals, ci.username)
-	}
 	cert = &ssh.Certificate{
-		CertType: ssh.UserCert,
-		Key:      pubkey,
-		Permissions: ssh.Permissions{
-			CriticalOptions: map[string]string{}, // "force-command": "id ; pwd ; /usr/bin/ls -a"},
-			Extensions:      map[string]string{"permit-agent-forwarding": "", "permit-pty": ""},
-			// Extensions:      map[string]string{"permit-agent-forwarding": "", "permit-pty": "", "groups@wayf.dk": data},
-		},
-		KeyId:           ci.principal,
-		ValidPrincipals: append(ca.DefaultPrincipals, principals...),
+		CertType:        ssh.UserCert,
+		Key:             pubkey,
+		Permissions:     ci.params.Permissions,
+		KeyId:           ci.principals[0],
+		ValidPrincipals: ci.principals,
 		ValidAfter:      uint64(now - 60),
-		ValidBefore:     uint64(now + ca.Settings.Ttl),
+		ValidBefore:     uint64(now + ci.params.Ttl),
 	}
 	err = cert.SignCert(rand.Reader, ca.Signer)
 	return
@@ -773,13 +845,13 @@ const (
 
 type (
 	certInfo struct {
-		ca        string
-		idp       string
-		pw        string
-		principal string
-		username  string
-		cert      *ssh.Certificate
-		eol       time.Time
+		ca         string
+		idp        string
+		pw         string
+		principals []string
+		params     CAParams
+		cert       *ssh.Certificate
+		eol        time.Time
 	}
 
 	rendezvous struct {
@@ -830,7 +902,7 @@ func (rv *rendezvous) wait(token string, cond int) (ci certInfo, ok bool) {
 	ticker := time.NewTicker(time.Second)
 	for {
 		ci, ok = rv.get(token)
-		if !ok || (cond == principal && ci.principal != "" && ci.pw == "") || (cond == certificate && ci.cert != nil) || (cond == principalAndPassword && ci.principal != "" && ci.pw != "") {
+		if !ok || (cond == principal && len(ci.principals) > 0 && ci.pw == "") || (cond == certificate && ci.cert != nil) || (cond == principalAndPassword && len(ci.principals) > 0 && ci.pw != "") {
 			return
 		}
 		<-ticker.C

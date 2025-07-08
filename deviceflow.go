@@ -14,54 +14,55 @@ func deviceflowHandler(w http.ResponseWriter, r *http.Request, token string, ca 
 	if err != nil {
 		return
 	}
-    tmpl.ExecuteTemplate(w, "deviceflow", map[string]any{"state": token, "verification_uri": resp["verification_uri_complete"].(string)})
+    tmpl.ExecuteTemplate(w, "deviceflow", map[string]any{"state": token, "verification_uri": resp.Verification_uri_complete})
     go func(token string) {
-		tokenResponse, _ := token_request(ca, resp["device_code"].(string))
-		if tokenResponse != nil {
-            resp, err := introspect(tokenResponse["access_token"].(string), ca)
+		tokenResponse, err := token_request(ca, resp)
+		if err == nil {
+            resp, err := introspect(tokenResponse.Access_token, ca)
             if err != nil {
                 return
             }
-            if val, ok := resp["sub"].(string); ok {
-                setPrincipal(token, val)
+	        if ci, ok := claims.get(token); ok {
+                claims.set(token, getMyAccssIdCertInfo(ci, resp))
             }
 		}
 	}(token)
 	return
 }
 
-func device_authorization_request(clientID, device_authorization string) (res map[string]any, err error) {
+func device_authorization_request(clientID, device_authorization string) (res DeviceResponse, err error) {
 	v := url.Values{}
 	v.Set("client_id", clientID)
-	v.Set("scope", "openid email profile eduperson_entitlement")
+    v.Set("scope", "openid email profile eduperson_entitlement urn:geant:efp.core.aai.geant.org:res:it4i.cz:act:ssh")
 	resp, err := client.PostForm(device_authorization, v)
 	if err != nil {
 		return
 	}
+
 	responsebody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return
 	}
-	res = map[string]any{}
+	res = DeviceResponse{}
 	json.Unmarshal(responsebody, &res)
 	return
 }
 
-func token_request(ca CaConfig, device_code string) (res map[string]any, err error) {
+func token_request(ca CaConfig, deviceResponse DeviceResponse) (res TokenResponse, err error) {
 	v := url.Values{}
 	v.Set("grant_type", "urn:ietf:params:oauth:grant-type:device_code")
-	v.Set("device_code", device_code)
+	v.Set("device_code", deviceResponse.Device_code)
 	v.Set("client_id", ca.ClientID)
 	tries := 10
-	timeout := 2 * time.Second
+	timeout := deviceResponse.Interval * time.Second
 	for tries > 0 {
 		tries--
 		resp, err := client.PostForm(ca.Op.Token, v)
 		if err != nil {
-			return nil, err
+			return res, err
 		} else if 200 <= resp.StatusCode && resp.StatusCode < 300 {
 			responsebody, _ := io.ReadAll(resp.Body)
-			res = map[string]any{}
+			res = TokenResponse{}
 			json.Unmarshal(responsebody, &res)
 			return res, nil
 		} else {
@@ -69,5 +70,5 @@ func token_request(ca CaConfig, device_code string) (res map[string]any, err err
 			continue
 		}
 	}
-	return nil, errors.New("")
+	return res, errors.New("")
 }
