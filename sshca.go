@@ -470,7 +470,7 @@ func sshsignHandler(w http.ResponseWriter, r *http.Request) (err error) {
 		return
 	}
 
-	ci := getMyAccssIdCertInfo(certInfo{}, res)
+	ci := getMyAccssIdCertInfo(certInfo{ca: ca}, res)
 	sshCertificate, err := newCertificate(config, publicKey, ci)
 	if err != nil {
 		return
