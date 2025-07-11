@@ -28,8 +28,8 @@ func main() {
 				Name:      "Demo CA",
 				Signer:    signer,
 				PublicKey: publicKey,
-				Settings: sshca.Settings{
-					Ttl: 36 * 3600,
+				CAParams: sshca.CAParams{
+					Ttl: 500,
 				},
 			},
 			"transport": {
