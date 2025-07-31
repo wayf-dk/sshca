@@ -54,7 +54,10 @@ func token_request(ca CaConfig, deviceResponse DeviceResponse) (res TokenRespons
 	v.Set("device_code", deviceResponse.Device_code)
 	v.Set("client_id", ca.ClientID)
 	tries := 10
-	timeout := deviceResponse.Interval * time.Second
+	timeout := 2 * time.Second
+	if deviceResponse.Interval != 0 {
+		timeout = deviceResponse.Interval * time.Second
+	}
 	for tries > 0 {
 		tries--
 		resp, err := client.PostForm(ca.Op.Token, v)
