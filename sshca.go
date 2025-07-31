@@ -197,7 +197,7 @@ func sshcaRouter(w http.ResponseWriter, r *http.Request) (err error) {
 				if ca.ClientID != "" {
 					op = ca.Name
 				}
-				err = tmpl.ExecuteTemplate(w, ca.HTMLTemplate, map[string]any{"ca": ca, "op": op, "rp": Config.RelayingParty, "ri": "//" + r.Host + "/" + ca.Id + "/ri"})
+				err = tmpl.ExecuteTemplate(w, ca.HTMLTemplate, map[string]any{"ca": ca, "op": op, "rp": Config.RelayingParty, "ri": "//" + r.Host + "/" + ca.Id + "/ri?"})
 				return
 			}
 		}
