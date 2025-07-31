@@ -187,7 +187,6 @@ func sshcaRouter(w http.ResponseWriter, r *http.Request) (err error) {
 			case "mindthegap":
 				http.ServeFileFS(w, r, Config.WWW, "/www/mindthegap.html")
 				return
-				//	return mindthegap(w, r, ca)
 			case "ri":
 				return riHandler(w, r, ca)
 			default:
@@ -557,38 +556,6 @@ func mindthegapPassive(w http.ResponseWriter, r *http.Request, ca CaConfig) (err
 	dsParams.Set("return", "https://"+r.Host+"/"+ca.Id)
 	http.Redirect(w, r, discoURL+dsParams.Encode(), http.StatusFound)
 	return wasPassive
-}
-
-func mindthegap(w http.ResponseWriter, r *http.Request, ca CaConfig) (err error) {
-	caURL := "https://" + r.Host + "/" + ca.Id
-	riURL := caURL + "/ri"
-	if ca.ClientID != "" {
-		err = tmpl.ExecuteTemplate(w, "mindthegap", map[string]string{"idpName": ca.Name, "riURL": riURL})
-		return
-	}
-	entityIDJSON, _ := mindthegapCheckIDPName(w, r, ca.Id)
-	discoURL := "https://wayf.wayf.dk/ds/?"
-	idpName := "Access through your Institution"
-	dsParams := url.Values{}
-	dsParams.Set("return", caURL+"/mindthegap")
-	dsParams.Set("entityID", Config.RelayingParty)
-	dsParams.Set("policy", "mindthegap,v2")
-	idp := idprec{}
-	errr := json.Unmarshal([]byte(entityIDJSON), &idp)
-	if errr == nil && idp.EntityID != "" {
-		idpName = idp.DisplayNames["en"]
-		riURL += "?entityID=" + url.QueryEscape(idp.EntityID)
-		if _, ok := r.Form["entityID"]; ok {
-			http.Redirect(w, r, riURL, http.StatusFound)
-			return
-		}
-	} else {
-		riURL = discoURL + dsParams.Encode()
-	}
-	dsParams.Set("policy", "v2")
-	p := map[string]string{"idpName": idpName, "riURL": riURL, "discoURL": discoURL + dsParams.Encode()}
-	err = tmpl.ExecuteTemplate(w, "mindthegap", p)
-	return
 }
 
 func sshserver() {
