@@ -78,16 +78,16 @@ type (
 
 	CaConfig struct {
 		Fake, Hide                                                                         bool
-		Id, Name, PublicKey                                                                string
-		ClientID, ClientSecret, ConfigEndpoint, IntroSpectClientID, IntroSpectClientSecret string
+		Id, Name, PublicKey, ConfigEndpoint                                string
 		SSHTemplate, HTMLTemplate                                                          string
 		DefaultPrincipals, AuthnContextClassRef                                            []string
 		HashedPrincipal                                                                    bool
 		MyAccessID                                                                         bool
-		Op                                                                                 Opconfig   `json:"-"`
-		Signer                                                                             ssh.Signer `json:"-"`
 		CAParams                                                                           CAParams
 		ScopeCAParams                                                                      map[string]CAParams
+		ClientID, ClientSecret, IntroSpectClientID, IntroSpectClientSecret string `json:"-"`
+		Op                                                                 Opconfig   `json:"-"`
+		Signer                                                             ssh.Signer `json:"-"`
 	}
 
 	Conf struct {
