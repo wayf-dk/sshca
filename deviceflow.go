@@ -14,17 +14,17 @@ func deviceflowHandler(w http.ResponseWriter, r *http.Request, token string, ca 
 	if err != nil {
 		return
 	}
-    tmpl.ExecuteTemplate(w, "deviceflow", map[string]any{"state": token, "verification_uri": resp.Verification_uri_complete})
-    go func(token string) {
+	tmpl.ExecuteTemplate(w, "deviceflow", map[string]any{"state": token, "verification_uri": resp.Verification_uri_complete})
+	go func(token string) {
 		tokenResponse, err := token_request(ca, resp)
 		if err == nil {
-            resp, err := introspect(tokenResponse.Access_token, ca)
-            if err != nil {
-                return
-            }
-	        if ci, ok := claims.get(token); ok {
-                claims.set(token, getMyAccssIdCertInfo(ci, resp))
-            }
+			resp, err := introspect(tokenResponse.Access_token, ca)
+			if err != nil {
+				return
+			}
+			if ci, ok := claims.get(token); ok {
+				claims.set(token, getMyAccssIdCertInfo(ci, resp))
+			}
 		}
 	}(token)
 	return
