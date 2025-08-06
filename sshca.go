@@ -183,7 +183,7 @@ func sshcaRouter(w http.ResponseWriter, r *http.Request) (err error) {
 			p2 := path[2]
 			switch p2 {
 			case "config":
-				jsonTxt, _ := json.MarshalIndent(ca, "", "    ")
+				jsonTxt, _ := json.MarshalIndent(ca.ClientConfig, "", "    ")
 				w.Header().Add("Content-Type", "application/json")
 				w.Write(jsonTxt)
 				return
