@@ -76,18 +76,23 @@ type (
 		Permissions ssh.Permissions
 	}
 
+	ClientConfig struct {
+		ClientID, ConfigEndpoint string
+	}
+
 	CaConfig struct {
-		Fake, Hide                                                                         bool
-		Id, Name, PublicKey, ConfigEndpoint                                string
-		SSHTemplate, HTMLTemplate                                                          string
-		DefaultPrincipals, AuthnContextClassRef                                            []string
-		HashedPrincipal                                                                    bool
-		MyAccessID                                                                         bool
-		CAParams                                                                           CAParams
-		ScopeCAParams                                                                      map[string]CAParams
-		ClientID, ClientSecret, IntroSpectClientID, IntroSpectClientSecret string `json:"-"`
-		Op                                                                 Opconfig   `json:"-"`
-		Signer                                                             ssh.Signer `json:"-"`
+		Fake, Hide                                               bool
+		Id, Name, PublicKey                                      string
+		SSHTemplate, HTMLTemplate                                string
+		DefaultPrincipals, AuthnContextClassRef                  []string
+		HashedPrincipal                                          bool
+		MyAccessID                                               bool
+		CAParams                                                 CAParams
+		ScopeCAParams                                            map[string]CAParams
+		ClientSecret, IntroSpectClientID, IntroSpectClientSecret string     `json:"-"`
+		Op                                                       Opconfig   `json:"-"`
+		Signer                                                   ssh.Signer `json:"-"`
+		ClientConfig
 	}
 
 	Conf struct {
