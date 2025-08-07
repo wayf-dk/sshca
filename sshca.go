@@ -77,12 +77,12 @@ type (
 	}
 
 	ClientConfig struct {
-		ClientID, ConfigEndpoint string
+		ClientID, ConfigEndpoint, PublicKey string
 	}
 
 	CaConfig struct {
 		Fake, Hide                                               bool
-		Id, Name, PublicKey                                      string
+		Id, Name                                                 string
 		SSHTemplate, HTMLTemplate                                string
 		DefaultPrincipals, AuthnContextClassRef                  []string
 		HashedPrincipal                                          bool
