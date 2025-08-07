@@ -88,6 +88,7 @@ type (
 		HashedPrincipal                                          bool
 		MyAccessID                                               bool
 		CAParams                                                 CAParams
+		Scope                                                    string
 		ScopeCAParams                                            map[string]CAParams
 		ClientSecret, IntroSpectClientID, IntroSpectClientSecret string     `json:"-"`
 		Op                                                       Opconfig   `json:"-"`
@@ -489,7 +490,7 @@ func introspect(token string, ca CaConfig) (res IntrospectionResponse, err error
 	data.Set("token", token)
 	data.Set("client_id", ca.IntroSpectClientID)
 	data.Set("client_secret", ca.IntroSpectClientSecret)
-	data.Set("scope", "openid email profile eduperson_entitlement urn:geant:efp.core.aai.geant.org:res:it4i.cz:act:ssh")
+	data.Set("scope", ca.Scope)
 
 	request, _ := http.NewRequest("POST", ca.Op.Introspect, strings.NewReader(data.Encode()))
 	request.Header.Add("Content-Type", "application/x-www-form-urlencoded")
