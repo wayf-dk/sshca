@@ -510,7 +510,7 @@ func introspect(token string, ca CaConfig) (res IntrospectionResponse, err error
 		return res, errors.New("json parsing error")
 	}
 
-	if slices.Index(res.Aud, ca.ClientID) < 0 {
+	if slices.Index(res.Aud, ca.ClientID) < 0 && slices.Index(res.Aud, ca.IntroSpectClientID) < 0 {
 		return IntrospectionResponse{}, errors.New("aud mismatach")
 	}
 
