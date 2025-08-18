@@ -566,6 +566,9 @@ func mindthegapPassive(w http.ResponseWriter, r *http.Request, ca CaConfig) (err
 
 func sshserver() {
 	sshConfig := &ssh.ServerConfig{
+		Config: ssh.Config{
+		    MACs: ssh.SupportedAlgorithms().MACs,
+		},
 		// Remove to disable public key auth.
 		PublicKeyCallback: func(c ssh.ConnMetadata, pubKey ssh.PublicKey) (*ssh.Permissions, error) {
 			if !allowedKeyTypes[pubKey.Type()] {
