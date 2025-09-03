@@ -10,7 +10,7 @@ import (
 )
 
 func deviceflowHandler(w http.ResponseWriter, r *http.Request, token string, ca CaConfig, ci certInfo) (err error) {
-	resp, err := device_authorization_request(ca.ClientID, ca.Op.Device_authorization)
+	resp, err := device_authorization_request(ca, ca.Op.Device_authorization)
 	if err != nil {
 		return
 	}
@@ -23,17 +23,18 @@ func deviceflowHandler(w http.ResponseWriter, r *http.Request, token string, ca 
                 return
             }
 	        if ci, ok := claims.get(token); ok {
-                claims.set(token, getMyAccssIdCertInfo(ci, resp))
+	            ci, _ = getMyAccssIdCertInfo(ci, myAccessIdParams{}, resp)
+                claims.set(token, ci)
             }
 		}
 	}(token)
 	return
 }
 
-func device_authorization_request(clientID, device_authorization string) (res DeviceResponse, err error) {
+func device_authorization_request(ca CaConfig, device_authorization string) (res DeviceResponse, err error) {
 	v := url.Values{}
-	v.Set("client_id", clientID)
-    v.Set("scope", "openid email profile eduperson_entitlement urn:geant:efp.core.aai.geant.org:res:it4i.cz:act:ssh")
+	v.Set("client_id", ca.ClientID)
+    v.Set("scope", ca.Scope)
 	resp, err := client.PostForm(device_authorization, v)
 	if err != nil {
 		return
