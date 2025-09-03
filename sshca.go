@@ -146,6 +146,7 @@ var (
 	}
 	wasPassive           = errors.New("wasPassive")
 	ssoTTL, rendevouzTTL time.Duration
+	ErrNoValidResourceFound = errors.New("no valid resource found")
 )
 
 func Sshca() {
@@ -274,6 +275,8 @@ func (fn appHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		status = 500
 		if err.Error() == "401" {
 			status = 401
+		} else if errors.Is(err, ErrNoValidResourceFound) {
+		    status = 403
 		}
 		http.Error(w, err.Error(), status)
 	} else {
@@ -359,7 +362,7 @@ func getMyAccssIdCertInfo(ci certInfo, params myAccessIdParams, res Introspectio
 		entitlement := Config.CaConfigs[ci.ca].EntitlementsNamespace + params.Resource + ":act:ssh"
 
 		if slices.Index(res.Entitlements, entitlement) == -1 {
-			return certInfo{}, fmt.Errorf("no valid resource found")
+			return certInfo{}, ErrNoValidResourceFound
 		}
 		if params, ok := Config.CaConfigs[ci.ca].ScopeCAParams[params.Resource]; ok {
 			ci.params = params
