@@ -146,7 +146,7 @@ var (
 	}
 	wasPassive           = errors.New("wasPassive")
 	ssoTTL, rendevouzTTL time.Duration
-	ErrNoValidResourceFound = errors.New("no valid resource found")
+	ErrNoValidResourceFound = errors.New("You don't have permission for the requested Resource")
 )
 
 func Sshca() {
