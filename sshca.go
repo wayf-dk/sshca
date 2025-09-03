@@ -60,15 +60,16 @@ type (
 	}
 
 	IntrospectionResponse struct {
-		Active    bool     `json:"active"`
-		Scope     string   `json:"scope,omitempty"`
-		Client_id string   `json:"client_id,omitempty"`
-		TokenType string   `json:"token_type,omitempty"`
-		Exp       int64    `json:"exp"`
-		Iat       int64    `json:"iat"`
-		Sub       string   `json:"sub,omitempty"`
-		Aud       []string `json:"aud,omitempty"`
-		Iss       string   `json:"iss,omitempty"`
+		Active       bool     `json:"active"`
+		Scope        string   `json:"scope,omitempty"`
+		Client_id    string   `json:"client_id,omitempty"`
+		TokenType    string   `json:"token_type,omitempty"`
+		Exp          int64    `json:"exp"`
+		Iat          int64    `json:"iat"`
+		Sub          string   `json:"sub,omitempty"`
+		Aud          []string `json:"aud,omitempty"`
+		Iss          string   `json:"iss,omitempty"`
+		Entitlements []string `json:"entitlements,omitempty"`
 	}
 
 	CAParams struct {
@@ -88,7 +89,7 @@ type (
 		HashedPrincipal                                          bool
 		MyAccessID                                               bool
 		CAParams                                                 CAParams
-		Scope                                                    string
+		Scope, EntitlementsNamespace                             string
 		ScopeCAParams                                            map[string]CAParams
 		ClientSecret, IntroSpectClientID, IntroSpectClientSecret string     `json:"-"`
 		Op                                                       Opconfig   `json:"-"`
@@ -118,6 +119,12 @@ type (
 	idprec struct {
 		EntityID     string
 		DisplayNames map[string]string
+	}
+
+	myAccessIdParams struct {
+		PublicKey string // don't use []byte - will be json interpreted as base64
+		OTT       string
+		Resource  string
 	}
 )
 
@@ -344,31 +351,39 @@ func pwdeviceHandler(w http.ResponseWriter, r *http.Request) (err error) {
 	return
 }
 
-func getMyAccssIdCertInfo(ci certInfo, res IntrospectionResponse) certInfo {
+func getMyAccssIdCertInfo(ci certInfo, params myAccessIdParams, res IntrospectionResponse) (certInfo, error) {
 	ci.principals = []string{res.Sub}
 	ci.params = Config.CaConfigs[ci.ca].CAParams
-	if scope := getEFPScope(res.Scope); scope != "" {
+	//params.Resource = "login.fzj.de"
+	if params.Resource != "" {
+		entitlement := Config.CaConfigs[ci.ca].EntitlementsNamespace + params.Resource + ":act:ssh"
+
+		if slices.Index(res.Entitlements, entitlement) == -1 {
+			return certInfo{}, fmt.Errorf("no valid resource found")
+		}
+		if params, ok := Config.CaConfigs[ci.ca].ScopeCAParams[params.Resource]; ok {
+			ci.params = params
+		}
+		ci.params.Permissions.Extensions["ssh-domain-grant@core.aai.geant.org"] = `["` + params.Resource + `"]`
+	} else if scope := getEFPScope(Config.CaConfigs[ci.ca].EntitlementsNamespace, strings.Split(res.Scope, " ")); scope != "" {
 		ci.principals = append(ci.principals, scope+"-"+res.Sub)
 		if params, ok := Config.CaConfigs[ci.ca].ScopeCAParams[scope]; ok {
 			ci.params = params
 		}
 	}
 	ci.eol = time.Now().Add(rendevouzTTL)
-	return ci
+	return ci, nil
 }
 
-func getEFPScope(scopeList string) (res string) {
-	const pre = "urn:geant:efp.core.aai.geant.org:res:"
-	const cab = ":act:ssh"
-	scopes := strings.Split(scopeList, " ")
-	if i := slices.IndexFunc(scopes, func(s string) bool { return strings.HasPrefix(s, pre) }); i >= 0 {
-		if tmp, ok := strings.CutPrefix(scopes[i], pre); ok {
-			if tmp, ok := strings.CutSuffix(tmp, cab); ok {
-				return tmp
+func getEFPScope(namespace string, values []string) string {
+	for _, val := range values {
+		if tmp, ok := strings.CutPrefix(val, namespace); ok {
+			if tmp, ok := strings.CutSuffix(tmp, ":act:ssh"); ok {
+			    return tmp
 			}
 		}
 	}
-	return res
+	return ""
 }
 
 func setPrincipal(token, principal string) (ci certInfo) {
@@ -447,10 +462,7 @@ func feedbackHandler(w http.ResponseWriter, r *http.Request) (err error) {
 }
 
 func sshsignHandler(w http.ResponseWriter, r *http.Request) (err error) {
-	params := struct {
-		PublicKey string // don't use []byte - will be json interpreted as base64
-		OTT       string
-	}{}
+	params := myAccessIdParams{}
 	defer r.Body.Close()
 	r.ParseForm()
 	path := strings.Split(r.URL.Path, "/")
@@ -465,6 +477,7 @@ func sshsignHandler(w http.ResponseWriter, r *http.Request) (err error) {
 		fmt.Println("err", err)
 		return
 	}
+
 	publicKey, _, _, _, err := ssh.ParseAuthorizedKey([]byte(params.PublicKey))
 	if err != nil {
 		return
@@ -475,7 +488,10 @@ func sshsignHandler(w http.ResponseWriter, r *http.Request) (err error) {
 		return
 	}
 
-	ci := getMyAccssIdCertInfo(certInfo{ca: ca}, res)
+	ci, err := getMyAccssIdCertInfo(certInfo{ca: ca}, params, res)
+	if err != nil {
+		return
+	}
 	sshCertificate, err := newCertificate(config, publicKey, ci)
 	if err != nil {
 		return
@@ -490,7 +506,6 @@ func introspect(token string, ca CaConfig) (res IntrospectionResponse, err error
 	data.Set("token", token)
 	data.Set("client_id", ca.IntroSpectClientID)
 	data.Set("client_secret", ca.IntroSpectClientSecret)
-	data.Set("scope", ca.Scope)
 
 	request, _ := http.NewRequest("POST", ca.Op.Introspect, strings.NewReader(data.Encode()))
 	request.Header.Add("Content-Type", "application/x-www-form-urlencoded")
@@ -567,7 +582,7 @@ func mindthegapPassive(w http.ResponseWriter, r *http.Request, ca CaConfig) (err
 func sshserver() {
 	sshConfig := &ssh.ServerConfig{
 		Config: ssh.Config{
-		    MACs: ssh.SupportedAlgorithms().MACs,
+			MACs: ssh.SupportedAlgorithms().MACs,
 		},
 		// Remove to disable public key auth.
 		PublicKeyCallback: func(c ssh.ConnMetadata, pubKey ssh.PublicKey) (*ssh.Permissions, error) {
