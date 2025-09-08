@@ -415,7 +415,9 @@ func ssoFinalize(w http.ResponseWriter, r *http.Request, token string, ci certIn
 		}
 		if ci.pw != "" {
 			if tmp, err := r.Cookie("pw"); err != nil || tmp.Value != ci.pw {
-				err = tmpl.ExecuteTemplate(w, "pw", map[string]any{"token": token})
+			    ci.pwparam = rand.Text()
+    			claims.set(token, ci)
+				err = tmpl.ExecuteTemplate(w, "pw", map[string]any{"token": token, "pwparam": ci.pwparam})
 				return err
 			}
 			ci.pw = ""
@@ -433,14 +435,18 @@ func pwHandler(w http.ResponseWriter, r *http.Request) (err error) {
 	token := path[2]
 	defer r.Body.Close()
 	r.ParseForm()
-	if ci, ok := claims.get(token); ok && ci.pw == r.Form.Get("pw") {
-		http.SetCookie(w, &http.Cookie{Name: "pw", Value: ci.pw, Path: "/", Secure: true, HttpOnly: true, MaxAge: 86400, SameSite: http.SameSiteNoneMode})
-		ci.pw = ""
-		claims.set(token, ci)
-		err = tmpl.ExecuteTemplate(w, "certificate", map[string]any{"token": token})
-		return
+	if ci, ok := claims.get(token); ok {
+	    if ci.pw == r.Form.Get(ci.pwparam) {
+    		http.SetCookie(w, &http.Cookie{Name: "pw", Value: ci.pw, Path: "/", Secure: true, HttpOnly: true, MaxAge: 86400, SameSite: http.SameSiteNoneMode})
+	    	ci.pw = ""
+	    	claims.set(token, ci)
+    		err = tmpl.ExecuteTemplate(w, "certificate", map[string]any{"token": token})
+	    } else {
+    	    ci.pwparam = rand.Text()
+            claims.set(token, ci)
+	        err = tmpl.ExecuteTemplate(w, "pw", map[string]any{"token": token, "pwparam": ci.pwparam})
+	    }
 	}
-	err = tmpl.ExecuteTemplate(w, "pw", map[string]any{"token": token})
 	return
 }
 
@@ -687,8 +693,8 @@ func handleSSHConnection(nConn net.Conn, sshConfig *ssh.ServerConfig) {
 						return
 
 					}
-					if len(*pw) < 6 {
-						io.WriteString(channel, "pw to short\n")
+					if len(*pw) < 15 {
+						io.WriteString(channel, "pw to short - min 15 chars\n")
 						channel.Close()
 						return
 					}
@@ -842,6 +848,7 @@ type (
 		ca         string
 		idp        string
 		pw         string
+		pwparam    string
 		principals []string
 		params     CAParams
 		cert       *ssh.Certificate
