@@ -443,7 +443,7 @@ func pwHandler(w http.ResponseWriter, r *http.Request) (err error) {
 	r.ParseForm()
 	if ci, ok := claims.get(token); ok {
 	    if ci.pw == r.Form.Get(ci.pwparam) {
-    		http.SetCookie(w, &http.Cookie{Name: "pw", Value: ci.pw, Path: "/", Secure: true, HttpOnly: true, MaxAge: 86400, SameSite: http.SameSiteStrictMode})
+    		http.SetCookie(w, &http.Cookie{Name: "pw", Value: ci.pw, Path: "/", Secure: true, HttpOnly: true, MaxAge: 86400, SameSite: http.SameSiteLaxMode})
 	    	ci.pw = ""
 	    	claims.set(token, ci)
     		err = tmpl.ExecuteTemplate(w, "certificate", map[string]any{"token": token})
