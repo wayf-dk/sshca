@@ -27,7 +27,9 @@ func main() {
 				Fake:      true,
 				Name:      "Demo CA",
 				Signer:    signer,
-				PublicKey: publicKey,
+				ClientConfig: sshca.ClientConfig{
+    				PublicKey: publicKey,
+				},
 				CAParams: sshca.CAParams{
 					Ttl: 500,
 				},
