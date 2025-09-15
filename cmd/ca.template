@@ -93,6 +93,7 @@ function setCurl() {
         const host = window.location.hostname
         const getCertCmd = `ssh -p ${sshport} ${window.location.hostname} token ${t}  > ~/.ssh/ssh-ca-demo-cert.pub`
         const curl = document.querySelector('#curl')
+        curl.innerText = getCertCmd
 
         feedback = new EventSource(`/feedback/${t}`)
         feedback.onmessage = (e) => {
@@ -101,10 +102,6 @@ function setCurl() {
                 document.querySelector('#manual').style.display = 'none'
             }
         }
-        feedback.addEventListener("cmdready", (e) => {
-            document.querySelector('#username').innerText = e.data
-            document.querySelector('#curl').innerText = getCertCmd
-        })
         feedback.addEventListener("certready", (e) => {
             document.querySelector('#cert').innerText = e.data
             document.querySelector('#manual').style.display = 'none'
