@@ -417,6 +417,7 @@ func ssoFinalize(w http.ResponseWriter, r *http.Request, token string, ci certIn
 			if tmp, err := r.Cookie("pw"); err != nil || tmp.Value != ci.pw {
 			    ci.pwparam = rand.Text()
     			claims.set(token, ci)
+        		http.SetCookie(w, &http.Cookie{Name: "pw", Path: "/", Secure: true, HttpOnly: true, MaxAge: -1, SameSite: http.SameSiteStrictMode})
 				err = tmpl.ExecuteTemplate(w, "pw", map[string]any{"token": token, "pwparam": ci.pwparam})
 				return err
 			}
