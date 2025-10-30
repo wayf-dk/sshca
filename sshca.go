@@ -32,7 +32,7 @@ import (
 
 type (
 	Flow   int
-	Claims map[string]any
+	Claims map[string][]string
 
 	appHandler func(http.ResponseWriter, *http.Request) error
 
@@ -333,7 +333,7 @@ func acsHandler(w http.ResponseWriter, r *http.Request, ca CaConfig) (err error)
 	if err != nil {
 		log.Fatal(err)
 	}
-	ci.claims, err = getUserInfo(tok.AccessToken, ca)
+	ci.claims, ci.resources, err = getUserInfo(tok.AccessToken, ca)
 	if err != nil {
 		return
 	}
@@ -343,7 +343,7 @@ func acsHandler(w http.ResponseWriter, r *http.Request, ca CaConfig) (err error)
 	return ssoFinalize(w, r, token, ci)
 }
 
-func getUserInfo(token string, ca CaConfig) (claims Claims, err error) {
+func getUserInfo(token string, ca CaConfig) (claims Claims, resources []resource, err error) {
 	data := url.Values{}
 	data.Set("token", token)
 	data.Set("client_id", ca.OAuth2Config.ClientID)
@@ -368,31 +368,60 @@ func getUserInfo(token string, ca CaConfig) (claims Claims, err error) {
 	ui := map[string]any{}
 	err = json.Unmarshal(responsebody, &ui)
 	if err != nil {
-		return nil, errors.New("json parsing error")
+		return nil, nil, errors.New("json parsing error")
 	}
 	claims = Claims{}
 	if ca.Fake {
 		claims["principal"] = []string{"a_really_fake_principal"}
 	} else {
-		principalClaim := ca.MandatoryClaims["principal"]
-		if principal, ok := ui[principalClaim]; ok {
-			if p, ok := principal.(string); ok {
-				claims["principal"] = []string{p}
-			} else if p, ok := principal.([]any)[0].(string); ok {
-				claims["principal"] = []string{p}
+        claims, err = claimsC14n(ca, ui)
+        if err != nil {
+            return
+        }
+	}
+    resources = getEFPResources(ca.EntitlementsNamespace, claims["entitlements"])
+	return
+}
+
+func claimsC14n(ca CaConfig, claims map[string]any) (canonicalClaims map[string][]string, err error) {
+    canonicalClaims = map[string][]string{}
+	for c14n, n := range ca.MandatoryClaims {
+		canonicalClaims[c14n] = []string{}
+		if claim, ok := claims[n]; ok {
+			if p, ok := claim.(string); ok {
+				canonicalClaims[c14n] = append(canonicalClaims[c14n], p)
+			} else if p, ok := claim.([]any); ok {
+				for _, val := range p {
+					if v, ok := val.(string); ok {
+						canonicalClaims[c14n] = append(canonicalClaims[c14n], v)
+					} else {
+						return nil, fmt.Errorf("Mandatory claim of unsupported type %s", n)
+					}
+				}
 			} else {
-				return claims, fmt.Errorf("Mandatory claim of unsupported type %s", principalClaim)
+				return nil, fmt.Errorf("Mandatory claim of unsupported type %s", n)
 			}
 		} else {
-			return claims, fmt.Errorf("Mandatory claim missing: %s", principalClaim)
+			return nil, fmt.Errorf("Mandatory claim missing: %s", n)
 		}
-		entitlements := []string{}
-		if ents, ok := ui["entitlements"]; ok {
-			for _, entitlement := range ents.([]any) {
-				entitlements = append(entitlements, entitlement.(string))
+	}
+	for n, c14n := range ca.Claims {
+		canonicalClaims[c14n] = []string{}
+		if claim, ok := claims[n]; ok {
+			if p, ok := claim.(string); ok {
+				canonicalClaims[c14n] = append(canonicalClaims[c14n], p)
+			} else if p, ok := claim.([]any); ok {
+				for _, val := range p {
+					if v, ok := val.(string); ok {
+						canonicalClaims[c14n] = append(canonicalClaims[c14n], v)
+					} else {
+						return nil, fmt.Errorf("Optional claim of unsupported type %s", n)
+					}
+				}
+			} else {
+				return nil, fmt.Errorf("Optional claim of unsupported type %s", n)
 			}
 		}
-		claims["resources"] = getEFPResources(ca.EntitlementsNamespace, entitlements)
 	}
 	return
 }
@@ -401,7 +430,7 @@ func riHandler(w http.ResponseWriter, r *http.Request, ca CaConfig) (err error) 
 	r.ParseForm()
 	ci := certInfo{ca: ca.Id, eol: time.Now().Add(ssoTTL)}
 	if ca.Fake {
-		ci.claims = Claims{"principal": []string{"a_really_fake_principal"}, "resources": []resource{}}
+		ci.claims = Claims{"principal": []string{"a_really_fake_principal"}}
 		token := claimsStore.set("", ci)
 		return ssoFinalize(w, r, token, ci)
 	}
@@ -448,35 +477,18 @@ func pwdeviceHandler(w http.ResponseWriter, r *http.Request) (err error) {
 	return
 }
 
-func getEFPResources(namespace string, values []string) (resources []resource) {
-	for _, val := range values {
-		if tmp, ok := strings.CutPrefix(val, namespace); ok {
-			if tmp, ok := strings.CutSuffix(tmp, ":act:ssh"); ok {
-				tmp2 := strings.Split(tmp+":", ":") // always at least 2 elements
-				for i, _ := range tmp2 {
-					if v, e := url.QueryUnescape(tmp2[i]); e == nil { // ignore errors for now ...
-						tmp2[i] = v
-					}
-				}
-				resources = append(resources, resource{Resource: tmp2[0], Uid: tmp2[1]})
-			}
-		}
-	}
-	return
-}
-
 func ssoFinalize(w http.ResponseWriter, r *http.Request, token string, ci certInfo) (err error) {
 	ca := Config.CaConfigs[ci.ca]
-	if len(ci.claims["principal"].([]string)) > 0 {
+	if len(ci.claims["principal"]) > 0 {
 		wantedAcrs := ca.AuthnContextClassRef
 		acrs := []string{}
 		for _, n := range []string{"acr", "edupersonassurance"} {
-			if claims, ok := ci.claims[n]; ok && len(claims.([]string)) > 0 {
-				acrs = append(acrs, strings.Split(ci.claims[n].([]string)[0], ",")...)
+			if claims, ok := ci.claims[n]; ok && len(claims) > 0 {
+				acrs = append(acrs, strings.Split(ci.claims[n][0], ",")...)
 			}
 		}
 		if len(wantedAcrs) > 0 && intersectionEmpty(wantedAcrs, acrs) {
-			return fmt.Errorf("no valid AuthnContextClassRef found: %v vs. %v", wantedAcrs, acrs)
+			return fmt.Errorf("no valid AuthnContextClassRef/acr found wanted: %v got: %v", wantedAcrs, acrs)
 		}
 		if ci.pw != "" {
 			if tmp, err := r.Cookie("pw"); err != nil || tmp.Value != ci.pw {
@@ -491,7 +503,7 @@ func ssoFinalize(w http.ResponseWriter, r *http.Request, token string, ci certIn
 			err = tmpl.ExecuteTemplate(w, "certificate", map[string]any{"token": token})
 			return
 		}
-		err = tmpl.ExecuteTemplate(w, ca.HTMLTemplate, map[string]any{"ci": ci, "ca": ca, "state": token, "sshport": Config.SshPort, "rp": Config.RelayingParty, "ri": "//" + r.Host + "/" + ca.Id + "/ri?", "resources": ci.claims["resources"]})
+		err = tmpl.ExecuteTemplate(w, ca.HTMLTemplate, map[string]any{"ci": ci, "ca": ca, "state": token, "sshport": Config.SshPort, "rp": Config.RelayingParty, "ri": "//" + r.Host + "/" + ca.Id + "/ri?", "resources": ci.resources})
 	}
 	return
 }
@@ -563,11 +575,11 @@ func sshsignHandler(w http.ResponseWriter, r *http.Request) (err error) {
 		return
 	}
 
-	claims, err := getUserInfo(params.OTT, ca)
+	claims, resources, err := getUserInfo(params.OTT, ca)
 	if err != nil {
 		return
 	}
-	ci := certInfo{ca: ca.Id, claims: claims}
+	ci := certInfo{ca: ca.Id, claims: claims, resources: resources}
 	sshCertificate, err := newCertificate(ca, publicKey, ci, params.Resource)
 	if err != nil {
 		return
@@ -772,7 +784,7 @@ func newCertificate(ca CaConfig, pubkey ssh.PublicKey, ci certInfo, res string) 
 		pubkey = pubkey.(*ssh.Certificate).Key
 	}
 	params := ca.CAParams
-	if slices.IndexFunc(ci.claims["resources"].([]resource), func(r resource) bool { return r.Resource == res }) >= 0 {
+	if slices.IndexFunc(ci.resources, func(r resource) bool { return r.Resource == res }) >= 0 {
 		if p, ok := Config.CaConfigs[ci.ca].ScopeCAParams[res]; ok {
 			params = p
 		}
@@ -780,8 +792,8 @@ func newCertificate(ca CaConfig, pubkey ssh.PublicKey, ci certInfo, res string) 
 		//		params.Permissions.Extensions["ssh-domain-grant@core.aai.geant.org:"+res] = "" //`["` + res + `"]` // experiment with data as key - lets ssh-keyget -L -f - show it as text
 		params.Permissions.Extensions["ssh-domain-grant@core.aai.geant.org:"] = `["` + res + `"]`
 	}
-	if username := usernameFromPrincipal(ci.claims["principal"].([]string)[0], ca); username != "" {
-		ci.claims["principal"] = append(ci.claims["principal"].([]string), username)
+	if username := usernameFromPrincipal(ci.claims["principal"][0], ca); username != "" {
+		ci.claims["principal"] = append(ci.claims["principal"], username)
 	}
 	now := time.Now().In(time.FixedZone("UTC", 0)).Unix()
 	cert = &ssh.Certificate{
@@ -789,8 +801,8 @@ func newCertificate(ca CaConfig, pubkey ssh.PublicKey, ci certInfo, res string) 
 		Serial:          uint64(time.Now().UnixNano()),
 		Key:             pubkey,
 		Permissions:     params.Permissions,
-		KeyId:           ci.claims["principal"].([]string)[0],
-		ValidPrincipals: ci.claims["principal"].([]string),
+		KeyId:           ci.claims["principal"][0],
+		ValidPrincipals: ci.claims["principal"],
 		ValidAfter:      uint64(now - 60),
 		ValidBefore:     uint64(now + params.Ttl),
 	}
@@ -913,7 +925,7 @@ func (rv *rendezvous) wait(token string, cond int) (ci certInfo, ok bool) {
 		if !ok {
 			return
 		}
-		principals := len(ci.claims["principal"].([]string)) > 0
+		principals := len(ci.claims["principal"]) > 0
 		if (cond == principal && principals && ci.pw == "") || (cond == certificate && ci.cert != nil) || (cond == principalAndPassword && principals && ci.pw != "") {
 			return
 		}
@@ -957,3 +969,23 @@ func intersectionEmpty(s1, s2 []string) (res bool) {
 	}
 	return true
 }
+
+// EFP
+
+func getEFPResources(namespace string, values []string) (resources []resource) {
+	for _, val := range values {
+		if tmp, ok := strings.CutPrefix(val, namespace); ok {
+			if tmp, ok := strings.CutSuffix(tmp, ":act:ssh"); ok {
+				tmp2 := strings.Split(tmp+":", ":") // always at least 2 elements
+				for i, _ := range tmp2 {
+					if v, e := url.QueryUnescape(tmp2[i]); e == nil { // ignore errors for now ...
+						tmp2[i] = v
+					}
+				}
+				resources = append(resources, resource{Resource: tmp2[0], Uid: tmp2[1]})
+			}
+		}
+	}
+	return
+}
+
