@@ -195,7 +195,7 @@ func sshcaRouter(w http.ResponseWriter, r *http.Request) (err error) {
 			return riHandler(w, r, ca)
 		case "sso2":
 			return sso2Handler(w, r, ca)
-		case "acs":
+		case "acs", "acs2":
 			return acsHandler(w, r, ca)
 		default:
 			op := ""
