@@ -1,6 +1,7 @@
 package sshca
 
 import (
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
@@ -13,6 +14,7 @@ import (
 	"html/template"
 	"io"
 	"log"
+	"maps"
 	"net"
 	"net/http"
 	"net/url"
@@ -25,9 +27,13 @@ import (
 
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
+	"golang.org/x/oauth2"
 )
 
 type (
+	Flow   int
+	Claims map[string]any
+
 	appHandler func(http.ResponseWriter, *http.Request) error
 
 	Provisioner struct {
@@ -35,41 +41,12 @@ type (
 	}
 
 	Opconfig struct {
+		Authorization        string `json:"authorization_endpoint"`
 		Userinfo             string `json:"userinfo_endpoint"`
 		Introspect           string `json:"introspection_endpoint"`
 		Device_authorization string `json:"device_authorization_endpoint"`
 		Token                string `json:"token_endpoint"`
 		Issuer               string `json:"issuer"`
-	}
-
-	DeviceResponse struct {
-		Device_code               string        `json:"device_code"`
-		Expires_in                int64         `json:"expires"`
-		Interval                  time.Duration `json:"interval"`
-		User_code                 string        `json:"user_code"`
-		Verification_uri          string        `json:"verification_uri"`
-		Verification_uri_complete string        `json:"verification_uri_complete"`
-	}
-
-	TokenResponse struct {
-		Scope        string `json:"scope,omitempty"`
-		Access_token string `json:"access_token,omitempty"`
-		Id_token     string `json:"id_token,omitempty"`
-		TokenType    string `json:"token_type,omitempty"`
-		Expires_in   int64  `json:"expires_in"`
-	}
-
-	IntrospectionResponse struct {
-		Active       bool     `json:"active"`
-		Scope        string   `json:"scope,omitempty"`
-		Client_id    string   `json:"client_id,omitempty"`
-		TokenType    string   `json:"token_type,omitempty"`
-		Exp          int64    `json:"exp"`
-		Iat          int64    `json:"iat"`
-		Sub          string   `json:"sub,omitempty"`
-		Aud          []string `json:"aud,omitempty"`
-		Iss          string   `json:"iss,omitempty"`
-		Entitlements []string `json:"entitlements,omitempty"`
 	}
 
 	CAParams struct {
@@ -82,18 +59,23 @@ type (
 	}
 
 	CaConfig struct {
-		Fake, Hide                                               bool
-		Id, Name                                                 string
-		SSHTemplate, HTMLTemplate                                string
-		DefaultPrincipals, AuthnContextClassRef                  []string
-		HashedPrincipal                                          bool
-		MyAccessID                                               bool
-		CAParams                                                 CAParams
-		Scope, EntitlementsNamespace                             string
-		ScopeCAParams                                            map[string]CAParams
-		ClientSecret, IntroSpectClientID, IntroSpectClientSecret string     `json:"-"`
-		Op                                                       Opconfig   `json:"-"`
-		Signer                                                   ssh.Signer `json:"-"`
+		Fake, Hide                                            bool
+		SSOHost, Id, Name                                     string
+		SSHTemplate, HTMLTemplate                             string
+		DefaultPrincipals, AuthnContextClassRef               []string
+		AllowedFlows                                          []Flow
+		HashedPrincipal                                       bool
+		MyAccessID                                            bool
+		CAParams                                              CAParams
+		Scope, EntitlementsNamespace                          string
+		ScopeCAParams                                         map[string]CAParams
+		IntroSpectClientID, IntroSpectClientSecret            string
+		IntroSpectConfigEndpoint, IntroSpectEndpoint          string
+		RedirectURL, UserInfoEndpoint, UserInfoConfigEndpoint string
+		OAuth2Config                                          *oauth2.Config
+		Op, Iop                                               Opconfig   `json:"-"`
+		Signer                                                ssh.Signer `json:"-"`
+		MandatoryClaims, Claims                               map[string]string
 		ClientConfig
 	}
 
@@ -107,18 +89,10 @@ type (
 		SshPort                    string
 		SshListenOn                string
 		WebListenOn                string
-		Principal                  string
-		AuthnContextClassRef       string
-		Assurance                  string
 		CaConfigs                  map[string]CaConfig
 		Cryptokilib                string
 		Slot                       string
 		NoOfSessions               int
-	}
-
-	idprec struct {
-		EntityID     string
-		DisplayNames map[string]string
 	}
 
 	myAccessIdParams struct {
@@ -129,7 +103,9 @@ type (
 )
 
 const (
-	sseRetry = 1000
+	SSHFLOW = iota
+	WEBFLOW
+	DEVICEFLOW
 )
 
 var (
@@ -137,15 +113,14 @@ var (
 		"ssh-ed25519":                      true,
 		"ssh-ed25519-cert-v01@openssh.com": true,
 	}
-	Config  Conf
-	tmpl    *template.Template
-	claims  = &rendezvous{}
-	client  = &http.Client{Timeout: 2 * time.Second}
-	funcMap = template.FuncMap{
+	Config      Conf
+	tmpl        *template.Template
+	claimsStore = &rendezvous{}
+	client      = &http.Client{Timeout: 2 * time.Second}
+	funcMap     = template.FuncMap{
 		"PathEscape": url.PathEscape,
 	}
-	wasPassive           = errors.New("wasPassive")
-	ssoTTL, rendevouzTTL time.Duration
+	ssoTTL, rendevouzTTL    time.Duration
 	ErrNoValidResourceFound = errors.New("You don't have permission for the requested Resource")
 )
 
@@ -153,8 +128,8 @@ func Sshca() {
 	tmpl = template.Must(template.New("ca.template").Funcs(funcMap).Parse(Config.Template))
 	ssoTTL, _ = time.ParseDuration(Config.SSOTTL)
 	rendevouzTTL, _ = time.ParseDuration(Config.RendevouzTTL)
-	claims.ttl = rendevouzTTL
-	claims.cleanUp()
+	claimsStore.ttl = rendevouzTTL
+	claimsStore.cleanUp()
 	Config.SshPort = Config.SshListenOn[strings.Index(Config.SshListenOn, ":")+1:]
 	prepareCAs()
 	go sshserver()
@@ -172,73 +147,112 @@ func faviconHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func sshcaRouter(w http.ResponseWriter, r *http.Request) (err error) {
+	r.ParseForm()
 	path := strings.Split(r.URL.Path+"//", "/")
-	p := path[1]
+	p, pp := path[1], path[2]
 	switch p { // handle /www /feedback /sso
 	case "www":
 		http.ServeFileFS(w, r, Config.WWW, r.URL.Path)
 		return
 	case "feedback":
 		return feedbackHandler(w, r)
-	case "sso": // returning from login
-		return ssoHandler(w, r)
 	case "pwdevice": // returning from login
 		return pwdeviceHandler(w, r)
 	case "pw": // returning from login
 		return pwHandler(w, r)
-	default:
-		ca, ok := Config.CaConfigs[p]
-		if ok { // handle /<ca>/.*
-			p2 := path[2]
-			switch p2 {
-			case "config":
-				jsonTxt, _ := json.MarshalIndent(ca.ClientConfig, "", "    ")
-				w.Header().Add("Content-Type", "application/json")
-				w.Write(jsonTxt)
-				return
-			case "sign":
-				return sshsignHandler(w, r)
-			case "mindthegap":
-				http.ServeFileFS(w, r, Config.WWW, "/www/mindthegap.html")
-				return
-			case "ri":
-				return riHandler(w, r, ca)
-			default:
-				if err = mindthegapPassive(w, r, ca); err != nil {
-					return
-				}
-				op := ""
-				if ca.ClientID != "" {
-					op = ca.Name
-				}
-				err = tmpl.ExecuteTemplate(w, ca.HTMLTemplate, map[string]any{"ca": ca, "op": op, "rp": Config.RelayingParty, "ri": "//" + r.Host + "/" + ca.Id + "/ri?"})
-				return
-			}
+	case "acs": // returning from login
+		if ci, ok := claimsStore.get(r.Form.Get("state")); ok {
+			return acsHandler(w, r, Config.CaConfigs[ci.ca])
 		}
-		if ci, ok := claims.get(p); ok { // see if it is a token
+		return
+	default:
+		if ci, ok := claimsStore.get(p); ok { // see if it is a token
 			return tokenHandler(w, r, p, ci)
 		}
-		err = tmpl.ExecuteTemplate(w, "listCAs", map[string]any{"config": Config.CaConfigs})
-		return
+		ca, ok := Config.CaConfigs[p]
+		if ok {
+			// pp = pp
+		} else if ca, ok = Config.CaConfigs[strings.Split(r.Host, ".")[0]]; ok {
+			pp = p
+		} else if ca, ok = Config.CaConfigs[r.Host]; ok {
+			pp = p
+		} else {
+			err = tmpl.ExecuteTemplate(w, "listCAs", map[string]any{"config": Config.CaConfigs})
+			return
+		}
+		switch pp {
+		case "config":
+			jsonTxt, _ := json.MarshalIndent(ca.ClientConfig, "", "    ")
+			w.Header().Add("Content-Type", "application/json")
+			w.Write(jsonTxt)
+			return
+		case "sign":
+			return sshsignHandler(w, r)
+		case "mindthegap":
+			http.ServeFileFS(w, r, Config.WWW, "/www/mindthegap.html")
+			return
+		case "ri":
+			return riHandler(w, r, ca)
+		case "sso2":
+			return sso2Handler(w, r, ca)
+		case "acs":
+			return acsHandler(w, r, ca)
+		default:
+			op := ""
+			if ca.ClientID != "" {
+				op = ca.Name
+			}
+			err = tmpl.ExecuteTemplate(w, ca.HTMLTemplate, map[string]any{"ca": ca, "op": op, "rp": Config.RelayingParty, "ri": "//" + r.Host + "/" + ca.Id + "/ri?"})
+			return
+		}
 	}
 }
 
 func prepareCAs() {
 	for i, v := range Config.CaConfigs {
 		if v.ConfigEndpoint != "" {
-		    fmt.Println("Get OIDC config for:", v.Name)
+			fmt.Println("Get OIDC config for:", v.Name)
 			v.Op = Opconfig{}
 			resp, err := http.Get(v.ConfigEndpoint)
 			if err != nil {
-			    fmt.Println("Failed ...")
-			    continue
+				fmt.Println("Failed ...")
+				continue
 			}
 			configJson, _ := io.ReadAll(resp.Body)
 			json.Unmarshal(configJson, &v.Op)
 		}
+		if v.UserInfoConfigEndpoint != "" {
+			fmt.Println("Get OIDC UserInfo config for:", v.Name)
+			op := Opconfig{}
+			resp, err := http.Get(v.UserInfoConfigEndpoint)
+			if err != nil {
+				fmt.Println("Failed ...")
+				continue
+			}
+			configJson, _ := io.ReadAll(resp.Body)
+			json.Unmarshal(configJson, &op)
+			v.OAuth2Config.Endpoint.AuthURL = op.Authorization
+			v.OAuth2Config.Endpoint.TokenURL = op.Token
+			v.UserInfoEndpoint = op.Userinfo
+		}
+		if v.IntroSpectConfigEndpoint != "" {
+			fmt.Println("Get OIDC Introspect config for:", v.Name)
+			op := Opconfig{}
+			resp, err := http.Get(v.IntroSpectConfigEndpoint)
+			if err != nil {
+				fmt.Println("Failed ...")
+				continue
+			}
+			configJson, _ := io.ReadAll(resp.Body)
+			json.Unmarshal(configJson, &op)
+			v.OAuth2Config.Endpoint.AuthURL = op.Authorization
+			v.OAuth2Config.Endpoint.TokenURL = op.Token
+			v.IntroSpectEndpoint = op.Introspect
+		}
 		if v.Signer == nil {
 			pubkey, _, _, _, _ := ssh.ParseAuthorizedKey([]byte(v.PublicKey))
 			privkeyLabel := base64.RawURLEncoding.EncodeToString(pubkey.(ssh.CryptoPublicKey).CryptoPublicKey().(ed25519.PublicKey)[:])
+			// privkeyLabel := "rsa1" // "ed255191"
 			if priv, ok := findPrivatekey(privkeyLabel); ok {
 				v.Signer = hsmSigner{
 					priv: priv,
@@ -251,6 +265,9 @@ func prepareCAs() {
 		}
 		v.Id = i
 		Config.CaConfigs[i] = v
+		if v.SSOHost != "" {
+			Config.CaConfigs[v.SSOHost] = v
+		}
 	}
 
 	if Config.CaConfigs["transport"].Signer == nil {
@@ -281,7 +298,7 @@ func (fn appHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if err.Error() == "401" {
 			status = 401
 		} else if errors.Is(err, ErrNoValidResourceFound) {
-		    status = 403
+			status = 403
 		}
 		http.Error(w, err.Error(), status)
 	} else {
@@ -292,13 +309,103 @@ func (fn appHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	log.Printf("%s %s %s %+v %1.3f %d %s", remoteAddr, r.Method, r.Host, r.URL, time.Since(starttime).Seconds(), status, err)
 }
 
-func riHandler(w http.ResponseWriter, r *http.Request, ca CaConfig) (err error) {
+func sso2Handler(w http.ResponseWriter, r *http.Request, ca CaConfig) (err error) {
+	verifier := oauth2.GenerateVerifier()
+	token := claimsStore.set("", certInfo{ca: ca.Id, verifier: verifier, eol: time.Now().Add(ssoTTL)})
+	url := ca.OAuth2Config.AuthCodeURL(token, oauth2.AccessTypeOffline, oauth2.S256ChallengeOption(verifier))
+	if idp := r.Form.Get("idpentityid"); idp != "" {
+		url += "&idpentityid=" + idp
+	}
+	http.Redirect(w, r, url, http.StatusFound)
+	return
+}
+
+func acsHandler(w http.ResponseWriter, r *http.Request, ca CaConfig) (err error) {
 	r.ParseForm()
-	token := claims.set("", certInfo{ca: ca.Id, eol: time.Now().Add(ssoTTL)})
-	if ca.ClientID != "" {
-		err = deviceflowHandler(w, r, token, ca, certInfo{})
+	code := r.Form.Get("code")
+	ci, ok := claimsStore.get(r.Form.Get("state"))
+	if !ok {
+		return errors.New("unknown state")
+	}
+
+	ctx := context.Background()
+	tok, err := ca.OAuth2Config.Exchange(ctx, code, oauth2.VerifierOption(ci.verifier))
+	if err != nil {
+		log.Fatal(err)
+	}
+	ci.claims, err = getUserInfo(tok.AccessToken, ca)
+	if err != nil {
 		return
 	}
+	// res map[string]interface {}{"error":"invalid_client"}
+	ci.eol = time.Now().Add(rendevouzTTL)
+	token := claimsStore.set("", ci)
+	return ssoFinalize(w, r, token, ci)
+}
+
+func getUserInfo(token string, ca CaConfig) (claims Claims, err error) {
+	data := url.Values{}
+	data.Set("token", token)
+	data.Set("client_id", ca.OAuth2Config.ClientID)
+	data.Set("client_secret", ca.OAuth2Config.ClientSecret)
+
+	request, _ := http.NewRequest("POST", ca.IntroSpectEndpoint, strings.NewReader(data.Encode()))
+	if ca.UserInfoEndpoint != "" {
+		request, _ = http.NewRequest("POST", ca.UserInfoEndpoint, strings.NewReader(data.Encode()))
+		request.Header.Add("Authorization", "Bearer "+token)
+	}
+	request.Header.Add("Content-Type", "application/x-www-form-urlencoded")
+	resp, err := client.Do(request)
+	if err != nil {
+		return
+	}
+	defer resp.Body.Close()
+	responsebody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return
+	}
+
+	ui := map[string]any{}
+	err = json.Unmarshal(responsebody, &ui)
+	if err != nil {
+		return nil, errors.New("json parsing error")
+	}
+	claims = Claims{}
+	if ca.Fake {
+		claims["principal"] = []string{"a_really_fake_principal"}
+	} else {
+		principalClaim := ca.MandatoryClaims["principal"]
+		if principal, ok := ui[principalClaim]; ok {
+			if p, ok := principal.(string); ok {
+				claims["principal"] = []string{p}
+			} else if p, ok := principal.([]any)[0].(string); ok {
+				claims["principal"] = []string{p}
+			} else {
+				return claims, fmt.Errorf("Mandatory claim of unsupported type %s", principalClaim)
+			}
+		} else {
+			return claims, fmt.Errorf("Mandatory claim missing: %s", principalClaim)
+		}
+		entitlements := []string{}
+		if ents, ok := ui["entitlements"]; ok {
+			for _, entitlement := range ents.([]any) {
+				entitlements = append(entitlements, entitlement.(string))
+			}
+		}
+		claims["resources"] = getEFPResources(ca.EntitlementsNamespace, entitlements)
+	}
+	return
+}
+
+func riHandler(w http.ResponseWriter, r *http.Request, ca CaConfig) (err error) {
+	r.ParseForm()
+	ci := certInfo{ca: ca.Id, eol: time.Now().Add(ssoTTL)}
+	if ca.Fake {
+		ci.claims = Claims{"principal": []string{"a_really_fake_principal"}, "resources": []resource{}}
+		token := claimsStore.set("", ci)
+		return ssoFinalize(w, r, token, ci)
+	}
+	token := claimsStore.set("", ci)
 	data := url.Values{}
 	data.Set("state", token)
 	if idp := r.Form.Get("entityID"); idp != "" {
@@ -307,18 +414,15 @@ func riHandler(w http.ResponseWriter, r *http.Request, ca CaConfig) (err error) 
 	if len(ca.AuthnContextClassRef) > 0 {
 		data.Set("acr_values", strings.Join(ca.AuthnContextClassRef, " "))
 	}
-	http.Redirect(w, r, "/sso?"+data.Encode(), http.StatusFound)
+
+	http.Redirect(w, r, "//"+ca.SSOHost+"/"+ca.Id+"/sso2?"+data.Encode(), http.StatusFound)
 	return
 }
 
 func tokenHandler(w http.ResponseWriter, r *http.Request, token string, ci certInfo) (err error) {
 	ca := Config.CaConfigs[ci.ca]
-	if ca.ClientID != "" {
-		err = deviceflowHandler(w, r, token, ca, ci)
-		return
-	}
 	ci.eol = time.Now().Add(ssoTTL)
-	claims.set(token, ci)
+	claimsStore.set(token, ci)
 	data := url.Values{}
 	data.Set("state", token)
 	if ci.idp != "" {
@@ -327,22 +431,7 @@ func tokenHandler(w http.ResponseWriter, r *http.Request, token string, ci certI
 	if len(ca.AuthnContextClassRef) > 0 {
 		data.Set("acr_values", strings.Join(ca.AuthnContextClassRef, " "))
 	}
-	http.Redirect(w, r, "/sso?"+data.Encode(), http.StatusFound)
-	return
-}
-
-func ssoHandler(w http.ResponseWriter, r *http.Request) (err error) {
-	r.ParseForm()
-	token := r.Form.Get("state")
-	ci, ok := claims.get(token)
-	if ok {
-		principal := r.Header.Get(Config.Principal)
-		if Config.CaConfigs[ci.ca].Fake {
-			principal = "a_really_fake_principal"
-		}
-		ci = setPrincipal(token, principal)
-		return ssoFinalize(w, r, token, ci)
-	}
+	http.Redirect(w, r, "//"+ca.SSOHost+"/sso?"+data.Encode(), http.StatusFound)
 	return
 }
 
@@ -350,88 +439,59 @@ func pwdeviceHandler(w http.ResponseWriter, r *http.Request) (err error) {
 	r.ParseForm()
 	token := r.Form.Get("state")
 	waitfor := principal
-	if ci, ok := claims.get(token); ok && ci.pw != "" {
+	if ci, ok := claimsStore.get(token); ok && ci.pw != "" {
 		waitfor = principalAndPassword
 	}
-	if ci, ok := claims.wait(token, waitfor); ok {
+	if ci, ok := claimsStore.wait(token, waitfor); ok {
 		return ssoFinalize(w, r, token, ci)
 	}
 	return
 }
 
-func getMyAccssIdCertInfo(ci certInfo, params myAccessIdParams, res IntrospectionResponse) (certInfo, error) {
-	ci.principals = []string{res.Sub}
-	ci.params = Config.CaConfigs[ci.ca].CAParams
-	//params.Resource = "login.fzj.de"
-	if params.Resource != "" {
-		entitlement := Config.CaConfigs[ci.ca].EntitlementsNamespace + params.Resource + ":act:ssh"
-
-		if slices.Index(res.Entitlements, entitlement) == -1 {
-			return certInfo{}, ErrNoValidResourceFound
-		}
-		if params, ok := Config.CaConfigs[ci.ca].ScopeCAParams[params.Resource]; ok {
-			ci.params = params
-		}
-		ci.params.Permissions.Extensions["ssh-domain-grant@core.aai.geant.org"] = `["` + params.Resource + `"]`
-	} else if scope := getEFPScope(Config.CaConfigs[ci.ca].EntitlementsNamespace, strings.Split(res.Scope, " ")); scope != "" {
-		ci.principals = append(ci.principals, scope+"-"+res.Sub)
-		if params, ok := Config.CaConfigs[ci.ca].ScopeCAParams[scope]; ok {
-			ci.params = params
-		}
-	}
-	ci.eol = time.Now().Add(rendevouzTTL)
-	return ci, nil
-}
-
-func getEFPScope(namespace string, values []string) string {
+func getEFPResources(namespace string, values []string) (resources []resource) {
 	for _, val := range values {
 		if tmp, ok := strings.CutPrefix(val, namespace); ok {
 			if tmp, ok := strings.CutSuffix(tmp, ":act:ssh"); ok {
-			    return tmp
+				tmp2 := strings.Split(tmp+":", ":") // always at least 2 elements
+				for i, _ := range tmp2 {
+					if v, e := url.QueryUnescape(tmp2[i]); e == nil { // ignore errors for now ...
+						tmp2[i] = v
+					}
+				}
+				resources = append(resources, resource{Resource: tmp2[0], Uid: tmp2[1]})
 			}
 		}
-	}
-	return ""
-}
-
-func setPrincipal(token, principal string) (ci certInfo) {
-	ci, ok := claims.get(token)
-	if ok {
-		ca := Config.CaConfigs[ci.ca]
-		ci.principals = []string{principal}
-		if username := usernameFromPrincipal(principal, ca); username != "" {
-			ci.principals = append(ci.principals, username)
-		}
-		ci.params = ca.CAParams
-		ci.eol = time.Now().Add(rendevouzTTL)
-		claims.set(token, ci)
 	}
 	return
 }
 
 func ssoFinalize(w http.ResponseWriter, r *http.Request, token string, ci certInfo) (err error) {
 	ca := Config.CaConfigs[ci.ca]
-	if len(ci.principals) > 0 {
+	if len(ci.claims["principal"].([]string)) > 0 {
 		wantedAcrs := ca.AuthnContextClassRef
-		acrs := strings.Split(r.Header.Get(Config.AuthnContextClassRef), ",")
-		acrs = append(acrs, strings.Split(r.Header.Get(Config.Assurance), ",")...)
+		acrs := []string{}
+		for _, n := range []string{"acr", "edupersonassurance"} {
+			if claims, ok := ci.claims[n]; ok && len(claims.([]string)) > 0 {
+				acrs = append(acrs, strings.Split(ci.claims[n].([]string)[0], ",")...)
+			}
+		}
 		if len(wantedAcrs) > 0 && intersectionEmpty(wantedAcrs, acrs) {
 			return fmt.Errorf("no valid AuthnContextClassRef found: %v vs. %v", wantedAcrs, acrs)
 		}
 		if ci.pw != "" {
 			if tmp, err := r.Cookie("pw"); err != nil || tmp.Value != ci.pw {
-			    ci.pwparam = rand.Text()
-    			claims.set(token, ci)
-        		http.SetCookie(w, &http.Cookie{Name: "pw", Path: "/", Secure: true, HttpOnly: true, MaxAge: -1, SameSite: http.SameSiteStrictMode})
+				ci.pwparam = rand.Text()
+				claimsStore.set(token, ci)
+				http.SetCookie(w, &http.Cookie{Name: "pw", Path: "/", Secure: true, HttpOnly: true, MaxAge: -1, SameSite: http.SameSiteStrictMode})
 				err = tmpl.ExecuteTemplate(w, "pw", map[string]any{"token": token, "pwparam": ci.pwparam})
 				return err
 			}
 			ci.pw = ""
-			claims.set(token, ci)
+			claimsStore.set(token, ci)
 			err = tmpl.ExecuteTemplate(w, "certificate", map[string]any{"token": token})
 			return
 		}
-		err = tmpl.ExecuteTemplate(w, ca.HTMLTemplate, map[string]any{"ci": ci, "ca": ca, "state": token, "sshport": Config.SshPort, "rp": Config.RelayingParty, "ri": "//" + r.Host + "/" + ca.Id + "/ri"})
+		err = tmpl.ExecuteTemplate(w, ca.HTMLTemplate, map[string]any{"ci": ci, "ca": ca, "state": token, "sshport": Config.SshPort, "rp": Config.RelayingParty, "ri": "//" + r.Host + "/" + ca.Id + "/ri?", "resources": ci.claims["resources"]})
 	}
 	return
 }
@@ -441,17 +501,17 @@ func pwHandler(w http.ResponseWriter, r *http.Request) (err error) {
 	token := path[2]
 	defer r.Body.Close()
 	r.ParseForm()
-	if ci, ok := claims.get(token); ok {
-	    if ci.pw == r.Form.Get(ci.pwparam) {
-    		http.SetCookie(w, &http.Cookie{Name: "pw", Value: ci.pw, Path: "/", Secure: true, HttpOnly: true, MaxAge: 86400, SameSite: http.SameSiteLaxMode})
-	    	ci.pw = ""
-	    	claims.set(token, ci)
-    		err = tmpl.ExecuteTemplate(w, "certificate", map[string]any{"token": token})
-	    } else {
-    	    ci.pwparam = rand.Text()
-            claims.set(token, ci)
-	        err = tmpl.ExecuteTemplate(w, "pw", map[string]any{"token": token, "pwparam": ci.pwparam})
-	    }
+	if ci, ok := claimsStore.get(token); ok {
+		if ci.pw == r.Form.Get(ci.pwparam) {
+			http.SetCookie(w, &http.Cookie{Name: "pw", Value: ci.pw, Path: "/", Secure: true, HttpOnly: true, MaxAge: 86400, SameSite: http.SameSiteLaxMode})
+			ci.pw = ""
+			claimsStore.set(token, ci)
+			err = tmpl.ExecuteTemplate(w, "certificate", map[string]any{"token": token})
+		} else {
+			ci.pwparam = rand.Text()
+			claimsStore.set(token, ci)
+			err = tmpl.ExecuteTemplate(w, "pw", map[string]any{"token": token, "pwparam": ci.pwparam})
+		}
 	}
 	return
 }
@@ -463,16 +523,19 @@ func feedbackHandler(w http.ResponseWriter, r *http.Request) (err error) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 
-	ci, ok := claims.wait(token, principal)
+	ci, ok := claimsStore.get(token)
 	if !ok {
-		http.Error(w, "StatusServiceUnavailable", 503)
+		fmt.Fprint(w, "event: cancel\ndata: none\n\n")
+		w.(http.Flusher).Flush()
 		return
 	}
-	w.(http.Flusher).Flush()
-	if ci, ok = claims.wait(token, certificate); !ok {
+	if ci.cert == nil {
+		fmt.Fprint(w, "event: wait\nretry: 2000\ndata: none\n\n")
+		w.(http.Flusher).Flush()
 		return
 	}
 	fmt.Fprintf(w, "event: certready\n%s\n\n", certPP(ci.cert, "data: "))
+	w.(http.Flusher).Flush()
 	return
 }
 
@@ -481,10 +544,12 @@ func sshsignHandler(w http.ResponseWriter, r *http.Request) (err error) {
 	defer r.Body.Close()
 	r.ParseForm()
 	path := strings.Split(r.URL.Path, "/")
-	ca := path[1]
-	config, ok := Config.CaConfigs[ca]
+	ca, ok := Config.CaConfigs[path[1]]
 	if !ok {
-		return fmt.Errorf("CA not found: %s", ca)
+		return fmt.Errorf("CA not found: %s", ca.Name)
+	}
+	if !slices.Contains(ca.AllowedFlows, DEVICEFLOW) {
+		return fmt.Errorf("device flow not enabled for this ca")
 	}
 	req, _ := io.ReadAll(r.Body)
 	err = json.Unmarshal(req, &params)
@@ -498,100 +563,18 @@ func sshsignHandler(w http.ResponseWriter, r *http.Request) (err error) {
 		return
 	}
 
-	res, err := introspect(params.OTT, config)
+	claims, err := getUserInfo(params.OTT, ca)
 	if err != nil {
 		return
 	}
-
-	ci, err := getMyAccssIdCertInfo(certInfo{ca: ca}, params, res)
-	if err != nil {
-		return
-	}
-	sshCertificate, err := newCertificate(config, publicKey, ci)
+	ci := certInfo{ca: ca.Id, claims: claims}
+	sshCertificate, err := newCertificate(ca, publicKey, ci, params.Resource)
 	if err != nil {
 		return
 	}
 	cert := ssh.MarshalAuthorizedKey(sshCertificate)
 	w.Write(cert)
 	return
-}
-
-func introspect(token string, ca CaConfig) (res IntrospectionResponse, err error) {
-	data := url.Values{}
-	data.Set("token", token)
-	data.Set("client_id", ca.IntroSpectClientID)
-	data.Set("client_secret", ca.IntroSpectClientSecret)
-
-	request, _ := http.NewRequest("POST", ca.Op.Introspect, strings.NewReader(data.Encode()))
-	request.Header.Add("Content-Type", "application/x-www-form-urlencoded")
-	resp, err := client.Do(request)
-	if err != nil {
-		return
-	}
-	defer resp.Body.Close()
-	responsebody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return
-	}
-
-	res = IntrospectionResponse{}
-	err = json.Unmarshal(responsebody, &res)
-	if err != nil {
-		return res, errors.New("json parsing error")
-	}
-
-	if slices.Index(res.Aud, ca.ClientID) < 0 && slices.Index(res.Aud, ca.IntroSpectClientID) < 0 {
-		return IntrospectionResponse{}, errors.New("aud mismatach")
-	}
-
-	if !res.Active {
-		return IntrospectionResponse{}, errors.New("inactive")
-	}
-
-	now := time.Now().Unix()
-	if res.Iat > now || res.Exp <= now {
-		return IntrospectionResponse{}, errors.New("token timeout")
-	}
-
-	if res.Iss != ca.Op.Issuer {
-		return IntrospectionResponse{}, errors.New("issuer mismatch")
-	}
-	return
-}
-
-func mindthegapCheckIDPName(w http.ResponseWriter, r *http.Request, ca string) (entityIDJSON string, err error) {
-	r.ParseForm()
-	cookieName := "mindthegap"
-	if _, ok := r.Form["entityID"]; ok {
-		entityIDJSON = r.Form.Get("entityIDJSON")
-		http.SetCookie(w, &http.Cookie{Name: cookieName, Value: base64.URLEncoding.EncodeToString([]byte(entityIDJSON)), Path: "/" + ca, Secure: true, MaxAge: 34560000})
-		return
-	}
-	if tmp, err := r.Cookie(cookieName); err == nil {
-		if data, err := base64.StdEncoding.DecodeString(tmp.Value); err == nil {
-			entityIDJSON = string(data)
-			return entityIDJSON, err
-		}
-	}
-	return "", wasPassive
-}
-
-func mindthegapPassive(w http.ResponseWriter, r *http.Request, ca CaConfig) (err error) {
-	if ca.ClientID != "" || ca.Fake {
-		return
-	}
-	if _, err = mindthegapCheckIDPName(w, r, ca.Id); err == nil {
-		return
-	}
-	discoURL := "https://wayf.wayf.dk/ds/?"
-	dsParams := url.Values{}
-	dsParams.Set("return", "https://"+r.Host+"/"+ca.Id)
-	dsParams.Set("entityID", Config.RelayingParty)
-	dsParams.Set("policy", "mindthegap,v2")
-	dsParams.Set("isPassive", "true")
-	dsParams.Set("return", "https://"+r.Host+"/"+ca.Id)
-	http.Redirect(w, r, discoURL+dsParams.Encode(), http.StatusFound)
-	return wasPassive
 }
 
 func sshserver() {
@@ -644,12 +627,6 @@ func sshserver() {
 }
 
 func handleSSHConnection(nConn net.Conn, sshConfig *ssh.ServerConfig) {
-	type tokenType uint8
-	const (
-		normal tokenType = iota
-		device
-	)
-
 	conn, chans, reqs, err := ssh.NewServerConn(nConn, sshConfig)
 	if err != nil {
 		log.Println("failed to handshake: ", err)
@@ -679,43 +656,50 @@ func handleSSHConnection(nConn net.Conn, sshConfig *ssh.ServerConfig) {
 			switch req.Type {
 			case "exec":
 				args := strings.Split(string(req.Payload[4:])+"  ", " ") // always at least 2 elements
-				cmd, token := args[0], args[1]
+				f1 := flag.NewFlagSet("", flag.ExitOnError)
+				ca := f1.String("ca", "", "")
+				idp := f1.String("idp", "", "")
+				pw := f1.String("pw", "", "")
+				resource := f1.String("resource", "", "")
+				f1.Parse(args[1:])
+				token := f1.Arg(0)
+				cmd := args[0]
+				fmt.Printf("sshd cmd: %s ca: %s idp: %s pw: %s resource: %s token: %s\n", cmd, *ca, *idp, *pw, *resource, token)
 				switch cmd {
 				case "demo":
 					demoCert(channel, publicKey)
 					channel.Close()
 					return
 				case "ca":
-					f1 := flag.NewFlagSet("", flag.ExitOnError)
-					ca := f1.String("ca", "", "")
-					idp := f1.String("idp", "", "")
-					pw := f1.String("pw", "", "")
-					f1.Parse(args[1:])
-
-					_, ok := Config.CaConfigs[*ca]
+					caConfig, ok := Config.CaConfigs[*ca]
 					if *ca != "" && !ok {
 						io.WriteString(channel, "unknown ca\n")
 						channel.Close()
 						return
-
+					}
+					if !slices.Contains(caConfig.AllowedFlows, SSHFLOW) {
+						io.WriteString(channel, "ssh flow not enabled for this ca\n")
+						channel.Close()
+						return
 					}
 					if len(*pw) < 15 {
 						io.WriteString(channel, "pw to short - min 15 chars\n")
 						channel.Close()
 						return
 					}
-					token = claims.set("", certInfo{ca: *ca, idp: *idp, pw: *pw, eol: time.Now().Add(rendevouzTTL)})
-					io.WriteString(channel, fmt.Sprintf(Config.Verification_uri_template, token))
+					token = claimsStore.set("", certInfo{ca: *ca, idp: *idp, pw: *pw, eol: time.Now().Add(rendevouzTTL)})
+					io.WriteString(channel, fmt.Sprintf(Config.Verification_uri_template, caConfig.SSOHost, token))
 				case "token": // fall thru below code common to ca and token
 				}
-				ci, ok := claims.wait(token, principal)
+				ci, ok := claimsStore.wait(token, principal)
 				if ok && user != "" && ci.cert == nil {
-					cert, err := newCertificate(Config.CaConfigs[ci.ca], publicKey, ci)
+					cert, err := newCertificate(Config.CaConfigs[ci.ca], publicKey, ci, *resource)
 					if err == nil {
 						certTxt := ssh.MarshalAuthorizedKey(cert)
 						fmt.Fprintf(channel, "%s", certTxt)
+						fmt.Printf("issued: %s\n", certPP(cert, ""))
 						ci.cert = cert
-						claims.set(token, ci)
+						claimsStore.set(token, ci)
 					}
 				}
 				channel.Close()
@@ -783,20 +767,32 @@ func demoCert(channel ssh.Channel, publicKey ssh.PublicKey) {
 	}
 }
 
-func newCertificate(ca CaConfig, pubkey ssh.PublicKey, ci certInfo) (cert *ssh.Certificate, err error) {
+func newCertificate(ca CaConfig, pubkey ssh.PublicKey, ci certInfo, res string) (cert *ssh.Certificate, err error) {
 	if _, ok := pubkey.(*ssh.Certificate); ok {
 		pubkey = pubkey.(*ssh.Certificate).Key
 	}
-
+	params := ca.CAParams
+	if slices.IndexFunc(ci.claims["resources"].([]resource), func(r resource) bool { return r.Resource == res }) >= 0 {
+		if p, ok := Config.CaConfigs[ci.ca].ScopeCAParams[res]; ok {
+			params = p
+		}
+		params.Permissions.Extensions = maps.Clone(params.Permissions.Extensions)
+		//		params.Permissions.Extensions["ssh-domain-grant@core.aai.geant.org:"+res] = "" //`["` + res + `"]` // experiment with data as key - lets ssh-keyget -L -f - show it as text
+		params.Permissions.Extensions["ssh-domain-grant@core.aai.geant.org:"] = `["` + res + `"]`
+	}
+	if username := usernameFromPrincipal(ci.claims["principal"].([]string)[0], ca); username != "" {
+		ci.claims["principal"] = append(ci.claims["principal"].([]string), username)
+	}
 	now := time.Now().In(time.FixedZone("UTC", 0)).Unix()
 	cert = &ssh.Certificate{
 		CertType:        ssh.UserCert,
+		Serial:          uint64(time.Now().UnixNano()),
 		Key:             pubkey,
-		Permissions:     ci.params.Permissions,
-		KeyId:           ci.principals[0],
-		ValidPrincipals: ci.principals,
+		Permissions:     params.Permissions,
+		KeyId:           ci.claims["principal"].([]string)[0],
+		ValidPrincipals: ci.claims["principal"].([]string),
 		ValidAfter:      uint64(now - 60),
-		ValidBefore:     uint64(now + ci.params.Ttl),
+		ValidBefore:     uint64(now + params.Ttl),
 	}
 	err = cert.SignCert(rand.Reader, ca.Signer)
 	return
@@ -850,15 +846,20 @@ const (
 )
 
 type (
+	resource struct {
+		Resource, Uid string
+	}
+
 	certInfo struct {
-		ca         string
-		idp        string
-		pw         string
-		pwparam    string
-		principals []string
-		params     CAParams
-		cert       *ssh.Certificate
-		eol        time.Time
+		ca        string
+		idp       string
+		pw        string
+		pwparam   string
+		verifier  string
+		claims    Claims
+		resources []resource
+		cert      *ssh.Certificate
+		eol       time.Time
 	}
 
 	rendezvous struct {
@@ -872,7 +873,7 @@ func (rv *rendezvous) cleanUp() {
 	go func() {
 		for {
 			<-ticker.C
-			rv.info.Range(func(k, v interface{}) bool {
+			rv.info.Range(func(k, v any) bool {
 				if v.(certInfo).eol.Before(time.Now()) {
 					rv.info.Delete(k)
 				}
@@ -909,7 +910,11 @@ func (rv *rendezvous) wait(token string, cond int) (ci certInfo, ok bool) {
 	ticker := time.NewTicker(time.Second)
 	for {
 		ci, ok = rv.get(token)
-		if !ok || (cond == principal && len(ci.principals) > 0 && ci.pw == "") || (cond == certificate && ci.cert != nil) || (cond == principalAndPassword && len(ci.principals) > 0 && ci.pw != "") {
+		if !ok {
+			return
+		}
+		principals := len(ci.claims["principal"].([]string)) > 0
+		if (cond == principal && principals && ci.pw == "") || (cond == certificate && ci.cert != nil) || (cond == principalAndPassword && principals && ci.pw != "") {
 			return
 		}
 		<-ticker.C

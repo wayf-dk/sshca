@@ -74,10 +74,9 @@ td { padding: 0.2em 0.5em; }
 </section>
 
 <section id=auto class=hidden>
-<h2>Username</h2>
-<pre id=username>{{ .username }}</pre>
 <h2>Installed certificate</h2>
 <pre id=cert></pre>
+<p>run: `ssh -p 2221 -o CertificateFile=~/.ssh/ssh-ca-demo-cert.pub demo@localhost demo` to se a dump of the certificate your SSH client would use if you tried to log in to a SSH server that required a ed25519 SSH certificate.
 </section>
 
 <script>
