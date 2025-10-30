@@ -160,7 +160,7 @@ func sshcaRouter(w http.ResponseWriter, r *http.Request) (err error) {
 		return pwdeviceHandler(w, r)
 	case "pw": // returning from login
 		return pwHandler(w, r)
-	case "acs": // returning from login
+	case "acs", "acs2": // returning from login
 		if ci, ok := claimsStore.get(r.Form.Get("state")); ok {
 			return acsHandler(w, r, Config.CaConfigs[ci.ca])
 		}
