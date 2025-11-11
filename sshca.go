@@ -730,7 +730,7 @@ func handleSSHConnection(nConn net.Conn, sshConfig *ssh.ServerConfig) {
 								PosixUsername: ci.resources[resourceIndex].Uid,
 							}
 							resJSON, _ := json.Marshal(res)
-							fmt.Fprintf(channel, "%s", resJSON)
+							fmt.Fprintf(channel, "%s\n", resJSON)
 						} else {
 							fmt.Fprintf(channel, "%s", certTxt)
 						}
