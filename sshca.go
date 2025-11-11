@@ -21,6 +21,7 @@ import (
 	"os"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -99,6 +100,12 @@ type (
 		PublicKey string // don't use []byte - will be json interpreted as base64
 		OTT       string
 		Resource  string
+	}
+
+	certRec struct {
+		SshCert       string `json:"ssh_cert"`
+		Resource      string `json:"resource"`
+		PosixUsername string `json:"posix_username"`
 	}
 )
 
@@ -374,17 +381,17 @@ func getUserInfo(token string, ca CaConfig) (claims Claims, resources []resource
 	if ca.Fake {
 		claims["principal"] = []string{"a_really_fake_principal"}
 	} else {
-        claims, err = claimsC14n(ca, ui)
-        if err != nil {
-            return
-        }
+		claims, err = claimsC14n(ca, ui)
+		if err != nil {
+			return
+		}
 	}
-    resources = getEFPResources(ca.EntitlementsNamespace, claims["entitlements"])
+	resources = getEFPResources(ca.EntitlementsNamespace, claims["entitlements"])
 	return
 }
 
 func claimsC14n(ca CaConfig, claims map[string]any) (canonicalClaims map[string][]string, err error) {
-    canonicalClaims = map[string][]string{}
+	canonicalClaims = map[string][]string{}
 	for c14n, n := range ca.MandatoryClaims {
 		canonicalClaims[c14n] = []string{}
 		if claim, ok := claims[n]; ok {
@@ -667,6 +674,7 @@ func handleSSHConnection(nConn net.Conn, sshConfig *ssh.ServerConfig) {
 		for req := range reqs {
 			switch req.Type {
 			case "exec":
+				resourceIndex := 0
 				args := strings.Split(string(req.Payload[4:])+"  ", " ") // always at least 2 elements
 				f1 := flag.NewFlagSet("", flag.ExitOnError)
 				ca := f1.String("ca", "", "")
@@ -701,14 +709,31 @@ func handleSSHConnection(nConn net.Conn, sshConfig *ssh.ServerConfig) {
 					}
 					token = claimsStore.set("", certInfo{ca: *ca, idp: *idp, pw: *pw, eol: time.Now().Add(rendevouzTTL)})
 					io.WriteString(channel, fmt.Sprintf(Config.Verification_uri_template, caConfig.SSOHost, token))
-				case "token": // fall thru below code common to ca and token
+				case "token2":
+					tmp := strings.Split(token+"-", "-") // always at least 2 elements
+					token = tmp[0]
+					resourceIndex, _ = strconv.Atoi(tmp[1]) // 0 is ok if it fails
+				case "token": // fall thru below code common to ca and tokenx
 				}
 				ci, ok := claimsStore.wait(token, principal)
 				if ok && user != "" && ci.cert == nil {
+					if cmd == "token2" && resourceIndex < len(ci.resources) && resourceIndex >= 0 {
+						resource = &ci.resources[resourceIndex].Resource
+					}
 					cert, err := newCertificate(Config.CaConfigs[ci.ca], publicKey, ci, *resource)
 					if err == nil {
 						certTxt := ssh.MarshalAuthorizedKey(cert)
-						fmt.Fprintf(channel, "%s", certTxt)
+						if cmd == "token2" {
+							res := certRec{
+								SshCert:       string(certTxt),
+								Resource:      *resource,
+								PosixUsername: ci.resources[resourceIndex].Uid,
+							}
+							resJSON, _ := json.Marshal(res)
+							fmt.Fprintf(channel, "%s", resJSON)
+						} else {
+							fmt.Fprintf(channel, "%s", certTxt)
+						}
 						fmt.Printf("issued: %s\n", certPP(cert, ""))
 						ci.cert = cert
 						claimsStore.set(token, ci)
@@ -988,4 +1013,3 @@ func getEFPResources(namespace string, values []string) (resources []resource) {
 	}
 	return
 }
-
