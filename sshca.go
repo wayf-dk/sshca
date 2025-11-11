@@ -714,6 +714,8 @@ func handleSSHConnection(nConn net.Conn, sshConfig *ssh.ServerConfig) {
 					token = tmp[0]
 					resourceIndex, _ = strconv.Atoi(tmp[1]) // 0 is ok if it fails
 				case "token": // fall thru below code common to ca and tokenx
+					tmp := strings.Split(token+"-", "-") // always at least 2 elements
+					token = tmp[0]
 				}
 				ci, ok := claimsStore.wait(token, principal)
 				if ok && user != "" && ci.cert == nil {
