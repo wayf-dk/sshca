@@ -102,9 +102,9 @@ type (
 	}
 
 	certRec struct {
-		SshCert       string `json:"ssh_cert"`
-		Resource      string `json:"resource"`
-		PosixUsername string `json:"posix_username"`
+		SshCert       string `json:"ssh_cert,omitempty"`
+		Resource      string `json:"resource,omitempty"`
+		PosixUsername string `json:"posix_username,omitempty"`
 	}
 )
 
