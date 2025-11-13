@@ -1052,5 +1052,6 @@ func getEFPResources(namespace string, values []string) (resources []resource) {
 			}
 		}
 	}
+	resources = append(resources, resource{Resource: "", Uid: ""})
 	return
 }
