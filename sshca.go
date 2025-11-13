@@ -69,7 +69,6 @@ type (
 		MyAccessID                                            bool
 		CAParams                                              CAParams
 		Scope, EntitlementsNamespace                          string
-		ScopeCAParams                                         map[string]CAParams
 		IntroSpectClientID, IntroSpectClientSecret            string
 		IntroSpectConfigEndpoint, IntroSpectEndpoint          string
 		RedirectURL, UserInfoEndpoint, UserInfoConfigEndpoint string
