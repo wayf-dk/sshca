@@ -194,6 +194,8 @@ func sshcaRouter(w http.ResponseWriter, r *http.Request) (err error) {
 			return
 		case "sign":
 			return sshsignHandler(w, r)
+		case "signJSON":
+			return sshsignHandlerJSON(w, r)
 		case "mindthegap":
 			http.ServeFileFS(w, r, Config.WWW, "/www/mindthegap.html")
 			return
@@ -558,16 +560,42 @@ func feedbackHandler(w http.ResponseWriter, r *http.Request) (err error) {
 }
 
 func sshsignHandler(w http.ResponseWriter, r *http.Request) (err error) {
+	cert, _, err := sshsign(w, r)
+	if err != nil {
+		return
+	}
+	w.Write(cert)
+	return
+}
+
+func sshsignHandlerJSON(w http.ResponseWriter, r *http.Request) (err error) {
+	cert, res, err := sshsign(w, r)
+	if err != nil {
+		return
+	}
+	rec := certRec{
+		SshCert:       string(cert),
+		Resource:      res.Resource,
+		PosixUsername: res.Uid,
+	}
+	resJSON, _ := json.Marshal(rec)
+	w.Write(resJSON)
+	return
+}
+
+func sshsign(w http.ResponseWriter, r *http.Request) (cert []byte, res resource, err error) {
 	params := myAccessIdParams{}
 	defer r.Body.Close()
 	r.ParseForm()
 	path := strings.Split(r.URL.Path, "/")
 	ca, ok := Config.CaConfigs[path[1]]
 	if !ok {
-		return fmt.Errorf("CA not found: %s", ca.Name)
+		err = fmt.Errorf("CA not found: %s", ca.Name)
+		return
 	}
 	if !slices.Contains(ca.AllowedFlows, DEVICEFLOW) {
-		return fmt.Errorf("device flow not enabled for this ca")
+		err = fmt.Errorf("device flow not enabled for this ca")
+		return
 	}
 	req, _ := io.ReadAll(r.Body)
 	err = json.Unmarshal(req, &params)
@@ -575,7 +603,6 @@ func sshsignHandler(w http.ResponseWriter, r *http.Request) (err error) {
 		fmt.Println("err", err)
 		return
 	}
-
 	publicKey, _, _, _, err := ssh.ParseAuthorizedKey([]byte(params.PublicKey))
 	if err != nil {
 		return
@@ -585,13 +612,20 @@ func sshsignHandler(w http.ResponseWriter, r *http.Request) (err error) {
 	if err != nil {
 		return
 	}
+
+    i := slices.IndexFunc(resources, func(r resource) bool { return r.Resource == params.Resource })
+	if  i < 0 {
+		err = fmt.Errorf("unknown resource %s", params.Resource)
+		return
+	}
+	res = resources[i]
+
 	ci := certInfo{ca: ca.Id, claims: claims, resources: resources}
 	sshCertificate, err := newCertificate(ca, publicKey, ci, params.Resource)
 	if err != nil {
 		return
 	}
-	cert := ssh.MarshalAuthorizedKey(sshCertificate)
-	w.Write(cert)
+	cert = ssh.MarshalAuthorizedKey(sshCertificate)
 	return
 }
 
@@ -711,15 +745,24 @@ func handleSSHConnection(nConn net.Conn, sshConfig *ssh.ServerConfig) {
 				case "token2":
 					tmp := strings.Split(token+"-", "-") // always at least 2 elements
 					token = tmp[0]
-					resourceIndex, _ = strconv.Atoi(tmp[1]) // 0 is ok if it fails
+					resourceIndex, err = strconv.Atoi(tmp[1])
+					if err != nil || resourceIndex < 0 {
+						channel.Close()
+						return
+					}
 				case "token": // fall thru below code common to ca and tokenx
-					tmp := strings.Split(token+"-", "-") // always at least 2 elements
-					token = tmp[0]
 				}
 				ci, ok := claimsStore.wait(token, principal)
 				if ok && user != "" && ci.cert == nil {
-					if cmd == "token2" && resourceIndex < len(ci.resources) && resourceIndex >= 0 {
+					posixUsername := ""
+					fmt.Println(cmd, resourceIndex)
+					if cmd == "token2" {
+						if resourceIndex >= len(ci.resources) {
+							channel.Close()
+							return
+						}
 						resource = &ci.resources[resourceIndex].Resource
+						posixUsername = ci.resources[resourceIndex].Uid
 					}
 					cert, err := newCertificate(Config.CaConfigs[ci.ca], publicKey, ci, *resource)
 					if err == nil {
@@ -728,7 +771,7 @@ func handleSSHConnection(nConn net.Conn, sshConfig *ssh.ServerConfig) {
 							res := certRec{
 								SshCert:       string(certTxt),
 								Resource:      *resource,
-								PosixUsername: ci.resources[resourceIndex].Uid,
+								PosixUsername: posixUsername,
 							}
 							resJSON, _ := json.Marshal(res)
 							fmt.Fprintf(channel, "%s\n", resJSON)
@@ -810,10 +853,7 @@ func newCertificate(ca CaConfig, pubkey ssh.PublicKey, ci certInfo, res string) 
 		pubkey = pubkey.(*ssh.Certificate).Key
 	}
 	params := ca.CAParams
-	if slices.IndexFunc(ci.resources, func(r resource) bool { return r.Resource == res }) >= 0 {
-		if p, ok := Config.CaConfigs[ci.ca].ScopeCAParams[res]; ok {
-			params = p
-		}
+	if res != "" {
 		params.Permissions.Extensions = maps.Clone(params.Permissions.Extensions)
 		//		params.Permissions.Extensions["ssh-domain-grant@core.aai.geant.org"+res] = "" //`["` + res + `"]` // experiment with data as key - lets ssh-keyget -L -f - show it as text
 		params.Permissions.Extensions["ssh-domain-grant@core.aai.geant.org"] = `["` + res + `"]`
