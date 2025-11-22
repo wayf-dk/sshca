@@ -1039,19 +1039,21 @@ func intersectionEmpty(s1, s2 []string) (res bool) {
 // EFP
 
 func getEFPResources(namespace string, values []string) (resources []resource) {
-	for _, val := range values {
-		if tmp, ok := strings.CutPrefix(val, namespace); ok {
-			if tmp, ok := strings.CutSuffix(tmp, ":act:ssh"); ok {
-				tmp2 := strings.Split(tmp+":", ":") // always at least 2 elements
-				for i, _ := range tmp2 {
-					if v, e := url.QueryUnescape(tmp2[i]); e == nil { // ignore errors for now ...
-						tmp2[i] = v
+	if namespace != "" {
+		for _, val := range values {
+			if tmp, ok := strings.CutPrefix(val, namespace); ok {
+				if tmp, ok := strings.CutSuffix(tmp, ":act:ssh"); ok {
+					tmp2 := strings.Split(tmp+":", ":") // always at least 2 elements
+					for i, _ := range tmp2 {
+						if v, e := url.QueryUnescape(tmp2[i]); e == nil { // ignore errors for now ...
+							tmp2[i] = v
+						}
 					}
+					resources = append(resources, resource{Resource: tmp2[0], Uid: tmp2[1]})
 				}
-				resources = append(resources, resource{Resource: tmp2[0], Uid: tmp2[1]})
 			}
 		}
+		resources = append(resources, resource{Resource: "", Uid: ""})
 	}
-	resources = append(resources, resource{Resource: "", Uid: ""})
 	return
 }
