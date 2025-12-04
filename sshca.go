@@ -336,11 +336,13 @@ func (fn appHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func sso2Handler(w http.ResponseWriter, r *http.Request, ca CaConfig) (err error) {
 	verifier := oauth2.GenerateVerifier()
 	token := claimsStore.set("", certInfo{ca: ca.Id, verifier: verifier, eol: time.Now().Add(ssoTTL)})
-	url := ca.OAuth2Config.AuthCodeURL(token, oauth2.AccessTypeOffline, oauth2.S256ChallengeOption(verifier))
-	if idp := r.Form.Get("idpentityid"); idp != "" {
-		url += "&idpentityid=" + idp
+	auth := ca.OAuth2Config.AuthCodeURL(token, oauth2.AccessTypeOffline, oauth2.S256ChallengeOption(verifier))
+	for _, p := range []string{"idpentityid", "acr_values"} {
+        if pv := r.Form.Get(p); pv != "" {
+            auth += "&"+p+"=" + url.QueryEscape(pv)
+        }
 	}
-	http.Redirect(w, r, url, http.StatusFound)
+	http.Redirect(w, r, auth, http.StatusFound)
 	return
 }
 
