@@ -676,7 +676,7 @@ func sshserver() {
 		log.Fatal("failed to create hostSigner: ", err)
 	}
 	sshConfig.AddHostKey(hostSigner)
-	// sshConfig.AddHostKey(Config.CaConfigs["transport"].Signer)
+	sshConfig.AddHostKey(Config.CaConfigs["transport"].Signer)
 
 	// Once a ServerConfig has been configured, connections can be
 	// accepted.
