@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/tls"
 	"embed"
 	"encoding/base64"
 	"encoding/json"
@@ -26,6 +27,7 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/crypto/nacl/secretbox"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
 	"golang.org/x/oauth2"
@@ -56,7 +58,7 @@ type (
 	}
 
 	ClientConfig struct {
-		ClientID, ConfigEndpoint, PublicKey string
+		PublicKey string
 	}
 
 	CaConfig struct {
@@ -102,9 +104,14 @@ type (
 	}
 
 	certRec struct {
-		SshCert       string `json:"ssh_cert,omitempty"`
+		SshCert       []byte `json:"ssh_cert,omitempty"`
 		Resource      string `json:"resource,omitempty"`
 		PosixUsername string `json:"posix_username,omitempty"`
+	}
+
+	secretsRec struct {
+		SlotPin               string
+		ServerCert, ServerKey []byte
 	}
 )
 
@@ -116,8 +123,8 @@ const (
 
 var (
 	allowedKeyTypes = map[string]bool{
-		"ssh-ed25519":                      true,
 		"ssh-ed25519-cert-v01@openssh.com": true,
+		"ssh-ed25519":                      true,
 	}
 	Config      Conf
 	tmpl        *template.Template
@@ -130,7 +137,15 @@ var (
 	ErrNoValidResourceFound = errors.New("You don't have permission for the requested Resource")
 )
 
-func Sshca() {
+func Sshca(envJson []byte) {
+	useHsm := flag.Bool("hsm", false, "use HSM")
+	flag.Parse()
+	pw, _ := os.LookupEnv("pw")
+	secrets := getConfig(envJson, pw)
+	if *useHsm {
+		InitPKCS11(secrets.SlotPin)
+	}
+
 	tmpl = template.Must(template.New("ca.template").Funcs(funcMap).Parse(Config.Template))
 	ssoTTL, _ = time.ParseDuration(Config.SSOTTL)
 	rendevouzTTL, _ = time.ParseDuration(Config.RendevouzTTL)
@@ -143,9 +158,22 @@ func Sshca() {
 	http.HandleFunc("/favicon.ico", faviconHandler)
 	http.Handle("/", appHandler(sshcaRouter))
 
-	fmt.Println("Listening on port: " + Config.WebListenOn)
-	err := http.ListenAndServe(Config.WebListenOn, nil)
-	fmt.Println("err: ", err)
+	log.Println("listening on ", Config.WebListenOn)
+	var s *http.Server
+	cert, _ := tls.X509KeyPair(secrets.ServerCert, secrets.ServerKey)
+	s = &http.Server{
+		Addr: Config.WebListenOn,
+		TLSConfig: &tls.Config{
+			Certificates: []tls.Certificate{cert},
+		},
+	}
+	s.SetKeepAlivesEnabled(false)
+	err := s.ListenAndServeTLS("", "")
+	if err != nil {
+		log.Printf("main(): %s\n", err)
+	} else {
+		log.Println("sshca stopped gracefully")
+	}
 }
 
 func faviconHandler(w http.ResponseWriter, r *http.Request) {
@@ -206,11 +234,7 @@ func sshcaRouter(w http.ResponseWriter, r *http.Request) (err error) {
 		case "acs", "acs2":
 			return acsHandler(w, r, ca)
 		default:
-			op := ""
-			if ca.ClientID != "" {
-				op = ca.Name
-			}
-			err = tmpl.ExecuteTemplate(w, ca.HTMLTemplate, map[string]any{"ca": ca, "op": op, "rp": Config.RelayingParty, "ri": "//" + r.Host + "/" + ca.Id + "/ri?"})
+			// err = tmpl.ExecuteTemplate(w, ca.HTMLTemplate, map[string]any{"ca": ca, "op": op, "rp": Config.RelayingParty, "ri": "//" + r.Host + "/" + ca.Id + "/ri?"})
 			return
 		}
 	}
@@ -218,17 +242,6 @@ func sshcaRouter(w http.ResponseWriter, r *http.Request) (err error) {
 
 func prepareCAs() {
 	for i, v := range Config.CaConfigs {
-		if v.ConfigEndpoint != "" {
-			fmt.Println("Get OIDC config for:", v.Name)
-			v.Op = Opconfig{}
-			resp, err := http.Get(v.ConfigEndpoint)
-			if err != nil {
-				fmt.Println("Failed ...")
-				continue
-			}
-			configJson, _ := io.ReadAll(resp.Body)
-			json.Unmarshal(configJson, &v.Op)
-		}
 		if v.UserInfoConfigEndpoint != "" {
 			fmt.Println("Get OIDC UserInfo config for:", v.Name)
 			op := Opconfig{}
@@ -560,21 +573,22 @@ func feedbackHandler(w http.ResponseWriter, r *http.Request) (err error) {
 }
 
 func sshsignHandler(w http.ResponseWriter, r *http.Request) (err error) {
-	cert, _, err := sshsign(w, r)
+	sshCertificate, _, err := sshsign(w, r)
 	if err != nil {
 		return
 	}
+	cert := ssh.MarshalAuthorizedKey(sshCertificate)
 	w.Write(cert)
 	return
 }
 
 func sshsignHandlerJSON(w http.ResponseWriter, r *http.Request) (err error) {
-	cert, res, err := sshsign(w, r)
+	sshCertificate, res, err := sshsign(w, r)
 	if err != nil {
 		return
 	}
 	rec := certRec{
-		SshCert:       string(cert),
+		SshCert:       sshCertificate.Marshal(),
 		Resource:      res.Resource,
 		PosixUsername: res.Uid,
 	}
@@ -583,7 +597,7 @@ func sshsignHandlerJSON(w http.ResponseWriter, r *http.Request) (err error) {
 	return
 }
 
-func sshsign(w http.ResponseWriter, r *http.Request) (cert []byte, res resource, err error) {
+func sshsign(w http.ResponseWriter, r *http.Request) (sshCertificate *ssh.Certificate, res resource, err error) {
 	params := myAccessIdParams{}
 	defer r.Body.Close()
 	r.ParseForm()
@@ -613,19 +627,18 @@ func sshsign(w http.ResponseWriter, r *http.Request) (cert []byte, res resource,
 		return
 	}
 
-    i := slices.IndexFunc(resources, func(r resource) bool { return r.Resource == params.Resource })
-	if  i < 0 {
+	i := slices.IndexFunc(resources, func(r resource) bool { return r.Resource == params.Resource })
+	if i < 0 {
 		err = fmt.Errorf("unknown resource %s", params.Resource)
 		return
 	}
 	res = resources[i]
 
 	ci := certInfo{ca: ca.Id, claims: claims, resources: resources}
-	sshCertificate, err := newCertificate(ca, publicKey, ci, params.Resource)
+	sshCertificate, err = newCertificate(ca, publicKey, ci, params.Resource)
 	if err != nil {
 		return
 	}
-	cert = ssh.MarshalAuthorizedKey(sshCertificate)
 	return
 }
 
@@ -658,7 +671,7 @@ func sshserver() {
 		log.Fatal("failed to create hostSigner: ", err)
 	}
 	sshConfig.AddHostKey(hostSigner)
-	//	sshConfig.AddHostKey(Config.CaConfigs["transport"].Signer)
+	// sshConfig.AddHostKey(Config.CaConfigs["transport"].Signer)
 
 	// Once a ServerConfig has been configured, connections can be
 	// accepted.
@@ -769,7 +782,7 @@ func handleSSHConnection(nConn net.Conn, sshConfig *ssh.ServerConfig) {
 						certTxt := ssh.MarshalAuthorizedKey(cert)
 						if cmd == "token2" {
 							res := certRec{
-								SshCert:       string(certTxt),
+								SshCert:       cert.Marshal(),
 								Resource:      *resource,
 								PosixUsername: posixUsername,
 							}
@@ -785,6 +798,7 @@ func handleSSHConnection(nConn net.Conn, sshConfig *ssh.ServerConfig) {
 				}
 				channel.Close()
 			case "shell":
+    			fmt.Fprintf(channel, "%s\n", "Access Denied")
 				channel.Close()
 			}
 		}
@@ -1024,16 +1038,31 @@ func GetSignerFromSshAgent() (pubkey string, signer ssh.Signer) {
 }
 
 func intersectionEmpty(s1, s2 []string) (res bool) {
-	hash := make(map[string]bool)
-	for _, e := range s1 {
-		hash[e] = true
-	}
-	for _, e := range s2 {
-		if hash[e] {
+	for _, s := range s1 {
+		if slices.Index(s2, s) >= 0 {
 			return false
 		}
 	}
 	return true
+}
+
+func getConfig(envJson []byte, pw string) (secrets secretsRec) {
+	var key [32]byte
+	keySlice, _ := base64.RawStdEncoding.DecodeString(pw)
+	copy(key[:], keySlice[:32])
+
+	var decryptNonce [24]byte
+	copy(decryptNonce[:], envJson[:24])
+	decrypted, ok := secretbox.Open(nil, envJson[24:], &decryptNonce, &key)
+	if !ok {
+		panic("decryption error")
+	}
+	secrets = secretsRec{}
+	err := json.Unmarshal(decrypted, &secrets)
+	if err != nil {
+		log.Panic(err)
+	}
+	return
 }
 
 // EFP
