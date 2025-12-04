@@ -104,7 +104,7 @@ type (
 	}
 
 	certRec struct {
-		SshCert       []byte `json:"ssh_cert,omitempty"`
+		SshCert       string `json:"ssh_cert,omitempty"`
 		Resource      string `json:"resource,omitempty"`
 		PosixUsername string `json:"posix_username,omitempty"`
 	}
@@ -135,6 +135,7 @@ var (
 	}
 	ssoTTL, rendevouzTTL    time.Duration
 	ErrNoValidResourceFound = errors.New("You don't have permission for the requested Resource")
+	hostCertTTL, _ = time.ParseDuration("720h")
 )
 
 func Sshca(envJson []byte) {
@@ -593,7 +594,7 @@ func sshsignHandlerJSON(w http.ResponseWriter, r *http.Request) (err error) {
 		return
 	}
 	rec := certRec{
-		SshCert:       sshCertificate.Marshal(),
+		SshCert:       string(ssh.MarshalAuthorizedKey(sshCertificate)),
 		Resource:      res.Resource,
 		PosixUsername: res.Uid,
 	}
@@ -787,7 +788,7 @@ func handleSSHConnection(nConn net.Conn, sshConfig *ssh.ServerConfig) {
 						certTxt := ssh.MarshalAuthorizedKey(cert)
 						if cmd == "token2" {
 							res := certRec{
-								SshCert:       cert.Marshal(),
+								SshCert:       string(certTxt),
 								Resource:      *resource,
 								PosixUsername: posixUsername,
 							}
@@ -818,7 +819,7 @@ func newHostSigner(signer ssh.Signer, keyId string, principals []string) (hostSi
 		KeyId:           keyId,
 		ValidPrincipals: principals,
 		ValidAfter:      uint64(now - 60),
-		ValidBefore:     uint64(now + 31556926),
+		ValidBefore:     uint64(now) + uint64(hostCertTTL),
 	}
 	err = cert.SignCert(rand.Reader, signer)
 	return ssh.NewCertSigner(cert, signer)
