@@ -135,6 +135,7 @@ var (
 	}
 	ssoTTL, rendevouzTTL    time.Duration
 	ErrNoValidResourceFound = errors.New("You don't have permission for the requested Resource")
+	hostCertTTL, _ = time.ParseDuration("720h")
 )
 
 func Sshca(envJson []byte) {
@@ -818,7 +819,7 @@ func newHostSigner(signer ssh.Signer, keyId string, principals []string) (hostSi
 		KeyId:           keyId,
 		ValidPrincipals: principals,
 		ValidAfter:      uint64(now - 60),
-		ValidBefore:     uint64(now + 31556926),
+		ValidBefore:     uint64(now + hostCertTTL),
 	}
 	err = cert.SignCert(rand.Reader, signer)
 	return ssh.NewCertSigner(cert, signer)
