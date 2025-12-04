@@ -5,7 +5,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
-	"crypto/tls"
+//	"crypto/tls"
 	"embed"
 	"encoding/base64"
 	"encoding/json"
@@ -158,7 +158,11 @@ func Sshca(envJson []byte) {
 	http.HandleFunc("/favicon.ico", faviconHandler)
 	http.Handle("/", appHandler(sshcaRouter))
 
-	log.Println("listening on ", Config.WebListenOn)
+	fmt.Println("Listening on port: " + Config.WebListenOn)
+	err := http.ListenAndServe(Config.WebListenOn, nil)
+	fmt.Println("err: ", err)
+
+/*
 	var s *http.Server
 	cert, _ := tls.X509KeyPair(secrets.ServerCert, secrets.ServerKey)
 	s = &http.Server{
@@ -174,6 +178,7 @@ func Sshca(envJson []byte) {
 	} else {
 		log.Println("sshca stopped gracefully")
 	}
+*/
 }
 
 func faviconHandler(w http.ResponseWriter, r *http.Request) {
