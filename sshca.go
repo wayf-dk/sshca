@@ -91,6 +91,7 @@ type (
 		SshPort                    string
 		SshListenOn                string
 		WebListenOn                string
+		UseRevProxy                bool
 		CaConfigs                  map[string]CaConfig
 		Cryptokilib                string
 		Slot                       string
@@ -158,13 +159,13 @@ func Sshca(envJson []byte) {
 
 	http.HandleFunc("/favicon.ico", faviconHandler)
 	http.Handle("/", appHandler(sshcaRouter))
-
+	if Config.UseRevProxy {
 	fmt.Println("Listening on port: " + Config.WebListenOn)
-	//err := http.ListenAndServe(Config.WebListenOn, nil)
-	//fmt.Println("err: ", err)
-	var s *http.Server
+		err := http.ListenAndServe(Config.WebListenOn, nil)
+		fmt.Println("err: ", err)
+	} else {
 	cert, _ := tls.X509KeyPair(secrets.ServerCert, secrets.ServerKey)
-	s = &http.Server{
+		s := &http.Server{
 		Addr: Config.WebListenOn,
 		TLSConfig: &tls.Config{
 			Certificates: []tls.Certificate{cert},
@@ -176,6 +177,7 @@ func Sshca(envJson []byte) {
 		log.Printf("main(): %s\n", err)
 	} else {
 		log.Println("sshca stopped gracefully")
+	}
 	}
 
 }
