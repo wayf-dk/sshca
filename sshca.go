@@ -130,13 +130,12 @@ var (
 	Config      Conf
 	tmpl        *template.Template
 	claimsStore = &rendezvous{}
-	client      = &http.Client{Timeout: 2 * time.Second}
-	funcMap     = template.FuncMap{
+	funcMap = template.FuncMap{
 		"PathEscape": url.PathEscape,
 	}
 	ssoTTL, rendevouzTTL    time.Duration
 	ErrNoValidResourceFound = errors.New("You don't have permission for the requested Resource")
-	hostCertTTL, _ = time.ParseDuration("720h")
+	hostCertTTL, _          = time.ParseDuration("720h")
 )
 
 func Sshca(envJson []byte) {
@@ -160,24 +159,24 @@ func Sshca(envJson []byte) {
 	http.HandleFunc("/favicon.ico", faviconHandler)
 	http.Handle("/", appHandler(sshcaRouter))
 	if Config.UseRevProxy {
-	fmt.Println("Listening on port: " + Config.WebListenOn)
+		fmt.Println("Listening on port: " + Config.WebListenOn)
 		err := http.ListenAndServe(Config.WebListenOn, nil)
 		fmt.Println("err: ", err)
 	} else {
-	cert, _ := tls.X509KeyPair(secrets.ServerCert, secrets.ServerKey)
+		cert, _ := tls.X509KeyPair(secrets.ServerCert, secrets.ServerKey)
 		s := &http.Server{
-		Addr: Config.WebListenOn,
-		TLSConfig: &tls.Config{
-			Certificates: []tls.Certificate{cert},
-		},
-	}
-	s.SetKeepAlivesEnabled(false)
-	err := s.ListenAndServeTLS("", "")
-	if err != nil {
-		log.Printf("main(): %s\n", err)
-	} else {
-		log.Println("sshca stopped gracefully")
-	}
+			Addr: Config.WebListenOn,
+			TLSConfig: &tls.Config{
+				Certificates: []tls.Certificate{cert},
+			},
+		}
+		s.SetKeepAlivesEnabled(false)
+		err := s.ListenAndServeTLS("", "")
+		if err != nil {
+			log.Printf("main(): %s\n", err)
+		} else {
+			log.Println("sshca stopped gracefully")
+		}
 	}
 
 }
@@ -341,9 +340,9 @@ func sso2Handler(w http.ResponseWriter, r *http.Request, ca CaConfig) (err error
 	token := claimsStore.set("", certInfo{ca: ca.Id, verifier: verifier, eol: time.Now().Add(ssoTTL)})
 	auth := ca.OAuth2Config.AuthCodeURL(token, oauth2.AccessTypeOffline, oauth2.S256ChallengeOption(verifier))
 	for _, p := range []string{"idpentityid", "acr_values"} {
-        if pv := r.Form.Get(p); pv != "" {
-            auth += "&"+p+"=" + url.QueryEscape(pv)
-        }
+		if pv := r.Form.Get(p); pv != "" {
+			auth += "&" + p + "=" + url.QueryEscape(pv)
+		}
 	}
 	http.Redirect(w, r, auth, http.StatusFound)
 	return
@@ -384,7 +383,7 @@ func getUserInfo(token string, ca CaConfig) (claims Claims, resources []resource
 		request.Header.Add("Authorization", "Bearer "+token)
 	}
 	request.Header.Add("Content-Type", "application/x-www-form-urlencoded")
-	resp, err := client.Do(request)
+	resp, err := http.DefaultClient.Do(request)
 	if err != nil {
 		return
 	}
@@ -806,7 +805,7 @@ func handleSSHConnection(nConn net.Conn, sshConfig *ssh.ServerConfig) {
 				}
 				channel.Close()
 			case "shell":
-    			fmt.Fprintf(channel, "%s\n", "Access Denied")
+				fmt.Fprintf(channel, "%s\n", "Access Denied")
 				channel.Close()
 			}
 		}
