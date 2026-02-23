@@ -204,8 +204,6 @@ func sshcaRouter(w http.ResponseWriter, r *http.Request) (err error) {
 		ca, ok := Config.CaConfigs[p]
 		if ok {
 			// pp = pp
-		} else if ca, ok = Config.CaConfigs[strings.Split(r.Host, ".")[0]]; ok {
-			pp = p
 		} else if ca, ok = Config.CaConfigs[r.Host]; ok {
 			pp = p
 		} else {
