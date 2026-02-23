@@ -231,14 +231,18 @@ func sshcaRouter(w http.ResponseWriter, r *http.Request) (err error) {
 }
 
 func prepareCAs() {
-	for i, v := range Config.CaConfigs {
+	cas := slices.Sorted(maps.Keys(Config.CaConfigs))
+
+
+	for _, k := range cas {
+	    v := Config.CaConfigs[k]
 		if v.SSOHost != "" { // neeeded here because we need to look up by host even if the initialization fails
 			Config.CaConfigs[v.SSOHost] = v
 		}
 		if v.HTMLTemplate == "" {
 			v.HTMLTemplate = Config.HTMLTemplate
 		}
-		v.Id = i
+		v.Id = k
 		if Signer != nil {
 			v.Signer = Signer
 			v.PublicKey = PublicKey
@@ -301,8 +305,7 @@ func prepareCAs() {
 		if v.HTMLTemplate == "" {
 			v.HTMLTemplate = Config.HTMLTemplate
 		}
-		v.Id = i
-		Config.CaConfigs[i] = v
+		Config.CaConfigs[k] = v
 	}
 
 	if Config.CaConfigs["transport"].Signer == nil {
