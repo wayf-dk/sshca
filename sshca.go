@@ -586,20 +586,24 @@ func feedbackHandler(w http.ResponseWriter, r *http.Request) (err error) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 
-	ci, ok := claimsStore.get(token)
-	if !ok {
-		fmt.Fprint(w, "event: cancel\ndata: none\n\n")
+	ticker := time.NewTicker(1 * time.Second)
+	for {
+		<-ticker.C
+		ci, ok := claimsStore.get(token)
+		if !ok {
+			fmt.Fprint(w, "event: cancel\ndata: none\n\n")
+			w.(http.Flusher).Flush()
+			return
+		}
+		if ci.cert == nil {
+			fmt.Fprint(w, "event: wait\ndata: none\n\n")
+			w.(http.Flusher).Flush()
+			continue
+		}
+		fmt.Fprintf(w, "event: certready\n%s\n\n", certPP(ci.cert, "data: "))
 		w.(http.Flusher).Flush()
 		return
 	}
-	if ci.cert == nil {
-		fmt.Fprint(w, "event: wait\nretry: 2000\ndata: none\n\n")
-		w.(http.Flusher).Flush()
-		return
-	}
-	fmt.Fprintf(w, "event: certready\n%s\n\n", certPP(ci.cert, "data: "))
-	w.(http.Flusher).Flush()
-	return
 }
 
 func sshsignHandler(w http.ResponseWriter, r *http.Request) (err error) {
