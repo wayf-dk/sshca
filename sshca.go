@@ -56,28 +56,24 @@ type (
 		Permissions ssh.Permissions
 	}
 
-	ClientConfig struct {
-		PublicKey string
-	}
-
 	CaConfig struct {
-		OK, Fake, Hide                                        bool
-		SSOHost, Id, Name                                     string
-		SSHTemplate, HTMLTemplate                             string
-		DefaultPrincipals, AuthnContextClassRef               []string
-		AllowedFlows                                          []Flow
-		HashedPrincipal                                       bool
-		MyAccessID, ResourcesMandatory                        bool
-		CAParams                                              CAParams
-		Scope, EntitlementsNamespace                          string
-		IntroSpectClientID, IntroSpectClientSecret            string
-		IntroSpectConfigEndpoint, IntroSpectEndpoint          string
-		RedirectURL, UserInfoEndpoint, UserInfoConfigEndpoint string
-		OAuth2Config                                          *oauth2.Config
-		Op, Iop                                               Opconfig   `json:"-"`
-		Signer                                                ssh.Signer `json:"-"`
-		MandatoryClaims, Claims                               map[string]string
-		ClientConfig
+		OK, Fake, Hide                               bool
+		SSOHost, Id, Name                            string
+		SSHTemplate, HTMLTemplate                    string
+		DefaultPrincipals, AuthnContextClassRef      []string
+		AllowedFlows                                 []Flow
+		HashedPrincipal                              bool
+		MyAccessID, ResourcesMandatory               bool
+		CAParams                                     CAParams
+		Scope, EntitlementsNamespace                 string
+		IntroSpectClientID, IntroSpectClientSecret   string
+		IntroSpectConfigEndpoint, IntroSpectEndpoint string
+		UserInfoEndpoint, UserInfoConfigEndpoint     string
+		PublicKey                                    string
+		OAuth2Config                                 *oauth2.Config
+		Op, Iop                                      Opconfig   `json:"-"`
+		Signer                                       ssh.Signer `json:"-"`
+		MandatoryClaims, Claims                      map[string]string
 	}
 
 	Conf struct {
@@ -214,11 +210,6 @@ func sshcaRouter(w http.ResponseWriter, r *http.Request) (err error) {
 			return
 		}
 		switch pp {
-		case "config":
-			jsonTxt, _ := json.MarshalIndent(ca.ClientConfig, "", "    ")
-			w.Header().Add("Content-Type", "application/json")
-			w.Write(jsonTxt)
-			return
 		case "sign":
 			return sshsignHandler(w, r)
 		case "signJSON":
@@ -250,7 +241,7 @@ func prepareCAs() {
 		v.Id = i
 		if Signer != nil {
 			v.Signer = Signer
-			v.ClientConfig.PublicKey = PublicKey
+			v.PublicKey = PublicKey
 		}
 		if v.UserInfoConfigEndpoint != "" {
 			fmt.Println("Get OIDC UserInfo config for:", v.Name)
