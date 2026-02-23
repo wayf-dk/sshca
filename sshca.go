@@ -129,7 +129,7 @@ var (
 	Secrets     secretsRec
 	tmpl        *template.Template
 	claimsStore = &rendezvous{}
-	funcMap = template.FuncMap{
+	funcMap     = template.FuncMap{
 		"PathEscape": url.PathEscape,
 	}
 	ssoTTL, rendevouzTTL    time.Duration
@@ -298,11 +298,11 @@ func prepareCAs() {
 				fmt.Println("Failed ...")
 				continue
 			}
-				v.Signer = hsmSigner{
-					priv: priv,
-					pub:  pubkey,
-				}
+			v.Signer = hsmSigner{
+				priv: priv,
+				pub:  pubkey,
 			}
+		}
 		v.OK = true
 		if v.SSOHost != "" { // needed again - otherwise
 			Config.CaConfigs[v.SSOHost] = v
