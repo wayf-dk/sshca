@@ -119,7 +119,6 @@ type (
 const (
 	SSHFLOW = iota
 	WEBFLOW
-	DEVICEFLOW
 )
 
 var (
