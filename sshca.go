@@ -613,6 +613,7 @@ func sshsignHandler(w http.ResponseWriter, r *http.Request) (err error) {
 	}
 	cert := ssh.MarshalAuthorizedKey(sshCertificate)
 	w.Write(cert)
+	log.Println(string(cert))
 	return
 }
 
@@ -621,13 +622,15 @@ func sshsignHandlerJSON(w http.ResponseWriter, r *http.Request) (err error) {
 	if err != nil {
 		return
 	}
+	cert := string(ssh.MarshalAuthorizedKey(sshCertificate))
 	rec := certRec{
-		SshCert:       string(ssh.MarshalAuthorizedKey(sshCertificate)),
+		SshCert:       cert,
 		Resource:      res.Resource,
 		PosixUsername: res.Uid,
 	}
 	resJSON, _ := json.Marshal(rec)
 	w.Write(resJSON)
+	log.Println(cert)
 	return
 }
 
