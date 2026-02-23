@@ -210,6 +210,10 @@ func sshcaRouter(w http.ResponseWriter, r *http.Request) (err error) {
 			err = tmpl.ExecuteTemplate(w, "listCAs", map[string]any{"config": Config.CaConfigs})
 			return
 		}
+		if !ca.OK {
+			err = tmpl.ExecuteTemplate(w, ca.HTMLTemplate, map[string]any{"ca": ca, "err": fmt.Sprintf("The SSH CA for the %s is not available", ca.Name)})
+			return
+		}
 		switch pp {
 		case "config":
 			jsonTxt, _ := json.MarshalIndent(ca.ClientConfig, "", "    ")
