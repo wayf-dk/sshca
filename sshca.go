@@ -757,17 +757,16 @@ func handleSSHConnection(nConn net.Conn, sshConfig *ssh.ServerConfig) {
 		for req := range reqs {
 			switch req.Type {
 			case "exec":
-				resourceIndex := 0
+				resourcesList := []int{}
 				args := strings.Split(string(req.Payload[4:])+"  ", " ") // always at least 2 elements
 				f1 := flag.NewFlagSet("", flag.ExitOnError)
 				ca := f1.String("ca", "", "")
 				idp := f1.String("idp", "", "")
 				pw := f1.String("pw", "", "")
-				resource := f1.String("resource", "", "")
 				f1.Parse(args[1:])
 				token := f1.Arg(0)
 				cmd := args[0]
-				fmt.Printf("sshd cmd: %s ca: %s idp: %s pw: %s resource: %s token: %s\n", cmd, *ca, *idp, *pw, *resource, token)
+				//				fmt.Printf("sshd cmd: %s ca: %s idp: %s pw: %s resource: %s token: %s\n", cmd, *ca, *idp, *pw, *resource, token)
 				switch cmd {
 				case "demo":
 					demoCert(channel, publicKey)
@@ -792,45 +791,48 @@ func handleSSHConnection(nConn net.Conn, sshConfig *ssh.ServerConfig) {
 					}
 					token = claimsStore.set("", certInfo{ca: *ca, idp: *idp, pw: *pw, eol: time.Now().Add(rendevouzTTL)})
 					io.WriteString(channel, fmt.Sprintf(Config.Verification_uri_template, caConfig.SSOHost, token))
-				case "token2":
-					tmp := strings.Split(token+"-", "-") // always at least 2 elements
+				case "token", "token2":
+					tmp := strings.Split(strings.Trim(token, " ")+"-", "-") // always at least 2 elements
 					token = tmp[0]
-					resourceIndex, err = strconv.Atoi(tmp[1])
-					if err != nil || resourceIndex < 0 {
+					if matched, _ := regexp.MatchString(`^[A-Z]?$`, strings.Trim(tmp[1], " ")); !matched {
+						io.WriteString(channel, "unknown resources\n")
 						channel.Close()
 						return
 					}
-				case "token": // fall thru below code common to ca and tokenx
+					for _, r := range tmp[1] {
+						i := int(r) - int('A')
+						resourcesList = append(resourcesList, i)
+					}
 				}
 				ci, ok := claimsStore.wait(token, principal)
 				if ok && user != "" && ci.cert == nil {
-					posixUsername := ""
-					fmt.Println(cmd, resourceIndex)
-					if cmd == "token2" {
-						if resourceIndex >= len(ci.resources) {
+					posixUsernames := []string{}
+					resources := []string{}
+					for _, r := range resourcesList {
+						if r >= len(ci.resources) {
 							channel.Close()
 							return
 						}
-						resource = &ci.resources[resourceIndex].Resource
-						posixUsername = ci.resources[resourceIndex].Uid
+						resources = append(resources, ci.resources[r].Resource)
+						posixUsernames = append(posixUsernames, ci.resources[r].Uid)
 					}
-					cert, err := newCertificate(Config.CaConfigs[ci.ca], publicKey, ci, *resource)
+					cert, err := newCertificate(Config.CaConfigs[ci.ca], publicKey, ci, resources)
 					if err == nil {
-						certTxt := ssh.MarshalAuthorizedKey(cert)
+						certTxt := string(ssh.MarshalAuthorizedKey(cert))
+						log.Println(certTxt)
 						if cmd == "token2" {
 							res := certRec{
-								SshCert:       string(certTxt),
-								Resource:      *resource,
-								PosixUsername: posixUsername,
+								SshCert:       certTxt,
+								Resource:      resources[0],
+								PosixUsername: posixUsernames[0],
 							}
 							resJSON, _ := json.Marshal(res)
 							fmt.Fprintf(channel, "%s\n", resJSON)
 						} else {
 							fmt.Fprintf(channel, "%s", certTxt)
 						}
-						fmt.Printf("issued: %s\n", certPP(cert, ""))
 						ci.cert = cert
-						claimsStore.set(token, ci)
+						claimsStore.set(token, ci) // for feedback to browser
 					}
 				}
 				channel.Close()
