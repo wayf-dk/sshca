@@ -1086,7 +1086,7 @@ func intersectionEmpty(s1, s2 []string) (res bool) {
 	return true
 }
 
-func getConfig(envJson []byte, pw string) (secrets secretsRec) {
+func GetConfig(envJson []byte, pw string) (secrets secretsRec) {
 	var key [32]byte
 	keySlice, _ := base64.RawStdEncoding.DecodeString(pw)
 	copy(key[:], keySlice[:32])
