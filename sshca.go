@@ -242,6 +242,17 @@ func sshcaRouter(w http.ResponseWriter, r *http.Request) (err error) {
 
 func prepareCAs() {
 	for i, v := range Config.CaConfigs {
+		if v.SSOHost != "" { // neeeded here because we need to look up by host even if the initialization fails
+			Config.CaConfigs[v.SSOHost] = v
+		}
+		if v.HTMLTemplate == "" {
+			v.HTMLTemplate = Config.HTMLTemplate
+		}
+		v.Id = i
+		if Signer != nil {
+			v.Signer = Signer
+			v.ClientConfig.PublicKey = PublicKey
+		}
 		if v.UserInfoConfigEndpoint != "" {
 			fmt.Println("Get OIDC UserInfo config for:", v.Name)
 			op := Opconfig{}
@@ -251,7 +262,11 @@ func prepareCAs() {
 				continue
 			}
 			configJson, _ := io.ReadAll(resp.Body)
-			json.Unmarshal(configJson, &op)
+			err = json.Unmarshal(configJson, &op)
+			if err != nil {
+				fmt.Println("Failed ...")
+				continue
+			}
 			v.OAuth2Config.Endpoint.AuthURL = op.Authorization
 			v.OAuth2Config.Endpoint.TokenURL = op.Token
 			v.UserInfoEndpoint = op.Userinfo
@@ -265,7 +280,11 @@ func prepareCAs() {
 				continue
 			}
 			configJson, _ := io.ReadAll(resp.Body)
-			json.Unmarshal(configJson, &op)
+			err = json.Unmarshal(configJson, &op)
+			if err != nil {
+				fmt.Println("Failed ...")
+				continue
+			}
 			v.OAuth2Config.Endpoint.AuthURL = op.Authorization
 			v.OAuth2Config.Endpoint.TokenURL = op.Token
 			v.IntroSpectEndpoint = op.Introspect
@@ -274,21 +293,26 @@ func prepareCAs() {
 			pubkey, _, _, _, _ := ssh.ParseAuthorizedKey([]byte(v.PublicKey))
 			privkeyLabel := base64.RawURLEncoding.EncodeToString(pubkey.(ssh.CryptoPublicKey).CryptoPublicKey().(ed25519.PublicKey)[:])
 			// privkeyLabel := "rsa1" // "ed255191"
-			if priv, ok := findPrivatekey(privkeyLabel); ok {
+			fmt.Println("Find Private key for", v.Name)
+			priv, ok := findPrivatekey(privkeyLabel)
+			if !ok {
+				fmt.Println("Failed ...")
+				continue
+			}
 				v.Signer = hsmSigner{
 					priv: priv,
 					pub:  pubkey,
 				}
 			}
+		v.OK = true
+		if v.SSOHost != "" { // needed again - otherwise
+			Config.CaConfigs[v.SSOHost] = v
 		}
 		if v.HTMLTemplate == "" {
 			v.HTMLTemplate = Config.HTMLTemplate
 		}
 		v.Id = i
 		Config.CaConfigs[i] = v
-		if v.SSOHost != "" {
-			Config.CaConfigs[v.SSOHost] = v
-		}
 	}
 
 	if Config.CaConfigs["transport"].Signer == nil {
