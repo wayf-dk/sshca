@@ -644,8 +644,8 @@ func sshsign(w http.ResponseWriter, r *http.Request) (sshCertificate *ssh.Certif
 		err = fmt.Errorf("CA not found: %s", ca.Name)
 		return
 	}
-	if !slices.Contains(ca.AllowedFlows, DEVICEFLOW) {
-		err = fmt.Errorf("device flow not enabled for this ca")
+	if !slices.Contains(ca.AllowedFlows, WEBFLOW) {
+		err = fmt.Errorf("webflow flow not enabled for this ca")
 		return
 	}
 	req, _ := io.ReadAll(r.Body)
@@ -665,14 +665,14 @@ func sshsign(w http.ResponseWriter, r *http.Request) (sshCertificate *ssh.Certif
 	}
 
 	i := slices.IndexFunc(resources, func(r resource) bool { return r.Resource == params.Resource })
-	if i < 0 {
+	if i < 0 { // no resources from getUserIfo -> no access
 		err = fmt.Errorf("unknown resource %s", params.Resource)
 		return
 	}
 	res = resources[i]
 
 	ci := certInfo{ca: ca.Id, claims: claims, resources: resources}
-	sshCertificate, err = newCertificate(ca, publicKey, ci, params.Resource)
+	sshCertificate, err = newCertificate(ca, publicKey, ci, []string{params.Resource})
 	if err != nil {
 		return
 	}
