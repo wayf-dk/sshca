@@ -901,15 +901,16 @@ func demoCert(channel ssh.Channel, publicKey ssh.PublicKey) {
 	}
 }
 
-func newCertificate(ca CaConfig, pubkey ssh.PublicKey, ci certInfo, res string) (cert *ssh.Certificate, err error) {
+func newCertificate(ca CaConfig, pubkey ssh.PublicKey, ci certInfo, resources []string) (cert *ssh.Certificate, err error) {
 	if _, ok := pubkey.(*ssh.Certificate); ok {
 		pubkey = pubkey.(*ssh.Certificate).Key
 	}
 	params := ca.CAParams
-	if res != "" {
+	if len(resources) > 0 {
+		res, _ := json.Marshal(resources)
 		params.Permissions.Extensions = maps.Clone(params.Permissions.Extensions)
-		//		params.Permissions.Extensions["ssh-domain-grant@core.aai.geant.org"+res] = "" //`["` + res + `"]` // experiment with data as key - lets ssh-keyget -L -f - show it as text
-		params.Permissions.Extensions["ssh-domain-grant@core.aai.geant.org"] = `["` + res + `"]`
+		// arams.Permissions.Extensions["ssh-domain-grant@core.aai.geant.org"+res] = "" //`["` + res + `"]` // experiment with data as key - lets ssh-keyget -L -f - show it as text
+		params.Permissions.Extensions["ssh-domain-grant@core.aai.geant.org"] = string(res)
 	}
 	if username := usernameFromPrincipal(ci.claims["principal"][0], ca); username != "" {
 		ci.claims["principal"] = append(ci.claims["principal"], username)
