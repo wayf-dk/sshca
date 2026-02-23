@@ -127,6 +127,7 @@ var (
 		"ssh-ed25519":                      true,
 	}
 	Config      Conf
+	Secrets     secretsRec
 	tmpl        *template.Template
 	claimsStore = &rendezvous{}
 	funcMap = template.FuncMap{
@@ -135,17 +136,11 @@ var (
 	ssoTTL, rendevouzTTL    time.Duration
 	ErrNoValidResourceFound = errors.New("You don't have permission for the requested Resource")
 	hostCertTTL, _          = time.ParseDuration("720h")
+	PublicKey               string
+	Signer                  ssh.Signer
 )
 
 func Sshca(envJson []byte) {
-	useHsm := flag.Bool("hsm", false, "use HSM")
-	flag.Parse()
-	pw, _ := os.LookupEnv("pw")
-	secrets := getConfig(envJson, pw)
-	if *useHsm {
-		InitPKCS11(secrets.SlotPin)
-	}
-
 	tmpl = template.Must(template.New("ca.template").Funcs(funcMap).Parse(Config.Template))
 	ssoTTL, _ = time.ParseDuration(Config.SSOTTL)
 	rendevouzTTL, _ = time.ParseDuration(Config.RendevouzTTL)
@@ -162,7 +157,7 @@ func Sshca(envJson []byte) {
 		err := http.ListenAndServe(Config.WebListenOn, nil)
 		fmt.Println("err: ", err)
 	} else {
-		cert, _ := tls.X509KeyPair(secrets.ServerCert, secrets.ServerKey)
+		cert, _ := tls.X509KeyPair(Secrets.ServerCert, Secrets.ServerKey)
 		s := &http.Server{
 			Addr: Config.WebListenOn,
 			TLSConfig: &tls.Config{
@@ -177,7 +172,6 @@ func Sshca(envJson []byte) {
 			log.Println("sshca stopped gracefully")
 		}
 	}
-
 }
 
 func faviconHandler(w http.ResponseWriter, r *http.Request) {
