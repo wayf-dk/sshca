@@ -378,7 +378,7 @@ func acsHandler(w http.ResponseWriter, r *http.Request, ca CaConfig) (err error)
 	ctx := context.Background()
 	tok, err := ca.OAuth2Config.Exchange(ctx, code, oauth2.VerifierOption(ci.verifier))
 	if err != nil {
-		log.Fatal(err)
+		return errors.New("oauth exchange failed")
 	}
 	ci.claims, ci.resources, err = getUserInfo(tok.AccessToken, ca)
 	if err != nil {
