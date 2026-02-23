@@ -62,13 +62,13 @@ type (
 	}
 
 	CaConfig struct {
-		Fake, Hide                                            bool
+		OK, Fake, Hide                                        bool
 		SSOHost, Id, Name                                     string
 		SSHTemplate, HTMLTemplate                             string
 		DefaultPrincipals, AuthnContextClassRef               []string
 		AllowedFlows                                          []Flow
 		HashedPrincipal                                       bool
-		MyAccessID                                            bool
+		MyAccessID, ResourcesMandatory                        bool
 		CAParams                                              CAParams
 		Scope, EntitlementsNamespace                          string
 		IntroSpectClientID, IntroSpectClientSecret            string
