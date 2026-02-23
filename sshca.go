@@ -535,7 +535,8 @@ func ssoFinalize(w http.ResponseWriter, r *http.Request, token string, ci certIn
 			}
 		}
 		if len(wantedAcrs) > 0 && intersectionEmpty(wantedAcrs, acrs) {
-			return fmt.Errorf("no valid AuthnContextClassRef/acr found wanted: %v got: %v", wantedAcrs, acrs)
+			tmpl.ExecuteTemplate(w, ca.HTMLTemplate, map[string]any{"err": fmt.Sprintf("No valid AuthnContextClassRef/acr found wanted: %v got: %v", wantedAcrs, acrs)})
+			return
 		}
 		if ci.pw != "" {
 			if tmp, err := r.Cookie("pw"); err != nil || tmp.Value != ci.pw {
@@ -548,6 +549,10 @@ func ssoFinalize(w http.ResponseWriter, r *http.Request, token string, ci certIn
 			ci.pw = ""
 			claimsStore.set(token, ci)
 			err = tmpl.ExecuteTemplate(w, "certificate", map[string]any{"token": token})
+			return
+		}
+		if ca.ResourcesMandatory && len(ci.resources) == 0 {
+			err = tmpl.ExecuteTemplate(w, ca.HTMLTemplate, map[string]any{"err": "Unfortunately, you do not have access to the EuroHPC Federation Platform."})
 			return
 		}
 		err = tmpl.ExecuteTemplate(w, ca.HTMLTemplate, map[string]any{"ci": ci, "ca": ca, "state": token, "sshport": Config.SshPort, "rp": Config.RelayingParty, "ri": "//" + r.Host + "/" + ca.Id + "/ri?", "resources": ci.resources})
