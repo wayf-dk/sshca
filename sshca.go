@@ -215,9 +215,9 @@ func sshcaRouter(w http.ResponseWriter, r *http.Request) (err error) {
 		}
 		switch pp {
 		case "sign":
-			return sshsignHandler(w, r)
+			return sshsignHandler(w, r, ca)
 		case "signJSON":
-			return sshsignHandlerJSON(w, r)
+			return sshsignHandlerJSON(w, r, ca)
 		case "mindthegap":
 			http.ServeFileFS(w, r, Config.WWW, "/www/mindthegap.html")
 			return
@@ -236,8 +236,6 @@ func sshcaRouter(w http.ResponseWriter, r *http.Request) (err error) {
 
 func prepareCAs() {
 	cas := slices.Sorted(maps.Keys(Config.CaConfigs))
-
-
 	for _, k := range cas {
 	    v := Config.CaConfigs[k]
 		if v.SSOHost != "" { // neeeded here because we need to look up by host even if the initialization fails
@@ -604,8 +602,8 @@ func feedbackHandler(w http.ResponseWriter, r *http.Request) (err error) {
 	}
 }
 
-func sshsignHandler(w http.ResponseWriter, r *http.Request) (err error) {
-	sshCertificate, _, err := sshsign(w, r)
+func sshsignHandler(w http.ResponseWriter, r *http.Request, ca CaConfig) (err error) {
+	sshCertificate, _, err := sshsign(w, r, ca)
 	if err != nil {
 		return
 	}
@@ -615,8 +613,8 @@ func sshsignHandler(w http.ResponseWriter, r *http.Request) (err error) {
 	return
 }
 
-func sshsignHandlerJSON(w http.ResponseWriter, r *http.Request) (err error) {
-	sshCertificate, res, err := sshsign(w, r)
+func sshsignHandlerJSON(w http.ResponseWriter, r *http.Request, ca CaConfig) (err error) {
+	sshCertificate, res, err := sshsign(w, r, ca)
 	if err != nil {
 		return
 	}
@@ -632,16 +630,10 @@ func sshsignHandlerJSON(w http.ResponseWriter, r *http.Request) (err error) {
 	return
 }
 
-func sshsign(w http.ResponseWriter, r *http.Request) (sshCertificate *ssh.Certificate, res resource, err error) {
+func sshsign(w http.ResponseWriter, r *http.Request, ca CaConfig) (sshCertificate *ssh.Certificate, res resource, err error) {
 	params := myAccessIdParams{}
 	defer r.Body.Close()
 	r.ParseForm()
-	path := strings.Split(r.URL.Path, "/")
-	ca, ok := Config.CaConfigs[path[1]]
-	if !ok {
-		err = fmt.Errorf("CA not found: %s", ca.Name)
-		return
-	}
 	if !slices.Contains(ca.AllowedFlows, WEBFLOW) {
 		err = fmt.Errorf("webflow flow not enabled for this ca")
 		return
