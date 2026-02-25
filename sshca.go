@@ -106,10 +106,11 @@ type (
 	}
 
 	secretsRec struct {
-		SlotPin               string
-		ServerCert, ServerKey []byte
-	}
-)
+		SlotPin                string
+		ServerCert, ServerKey  []byte
+		ClientSecrets           map[string]string
+		IntroSpectClientSecrets map[string]string
+	})
 
 const (
 	SSHFLOW = iota
