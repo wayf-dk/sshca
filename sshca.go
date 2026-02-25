@@ -207,6 +207,9 @@ func sshcaRouter(w http.ResponseWriter, r *http.Request) (err error) {
 			return
 		}
 		if !ca.OK {
+            if slices.Contains([]string{"sign", "signJSON"}, pp) {
+            	return fmt.Errorf("The SSH CA for the %s is not available", ca.Name)
+            }
 			err = tmpl.ExecuteTemplate(w, ca.HTMLTemplate, map[string]any{"ca": ca, "err": fmt.Sprintf("The SSH CA for the %s is not available", ca.Name)})
 			return
 		}
