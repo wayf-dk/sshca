@@ -948,7 +948,7 @@ func certPP(cert *ssh.Certificate, prefix string) (pp []byte) {
 }
 
 // PP - super simple Pretty Print - using JSON
-func PP(i ...interface{}) {
+func PP(i ...any) {
 	for _, e := range i {
 		switch v := e.(type) {
 		case []byte:
@@ -958,7 +958,6 @@ func PP(i ...interface{}) {
 			fmt.Println(string(s))
 		}
 	}
-	return
 }
 
 // rendezvous
@@ -1105,7 +1104,7 @@ func getEFPResources(namespace string, values []string) (resources []resource) {
 			if tmp, ok := strings.CutPrefix(val, namespace); ok {
 				if tmp, ok := strings.CutSuffix(tmp, ":act:ssh"); ok {
 					tmp2 := strings.Split(tmp+":", ":") // always at least 2 elements
-					for i, _ := range tmp2 {
+					for i := range tmp2 {
 						if v, e := url.QueryUnescape(tmp2[i]); e == nil { // ignore errors for now ...
 							tmp2[i] = v
 						}
