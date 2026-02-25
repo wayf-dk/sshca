@@ -263,6 +263,7 @@ func prepareCAs() {
 				fmt.Println("Failed ...")
 				continue
 			}
+			v.OAuth2Config.ClientSecret = Secrets.ClientSecrets[k]
 			v.OAuth2Config.Endpoint.AuthURL = op.Authorization
 			v.OAuth2Config.Endpoint.TokenURL = op.Token
 			v.UserInfoEndpoint = op.Userinfo
@@ -281,14 +282,15 @@ func prepareCAs() {
 				fmt.Println("Failed ...")
 				continue
 			}
-			v.OAuth2Config.Endpoint.AuthURL = op.Authorization
+			v.OAuth2Config.ClientSecret = Secrets.ClientSecrets[k]
+    		v.OAuth2Config.Endpoint.AuthURL = op.Authorization
 			v.OAuth2Config.Endpoint.TokenURL = op.Token
+            v.IntroSpectClientSecret = Secrets.IntroSpectClientSecrets[k]
 			v.IntroSpectEndpoint = op.Introspect
 		}
 		if v.Signer == nil {
 			pubkey, _, _, _, _ := ssh.ParseAuthorizedKey([]byte(v.PublicKey))
 			privkeyLabel := base64.RawURLEncoding.EncodeToString(pubkey.(ssh.CryptoPublicKey).CryptoPublicKey().(ed25519.PublicKey)[:])
-			// privkeyLabel := "rsa1" // "ed255191"
 			fmt.Println("Find Private key for", v.Name)
 			priv, ok := findPrivatekey(privkeyLabel)
 			if !ok {
