@@ -213,6 +213,9 @@ func sshcaRouter(w http.ResponseWriter, r *http.Request) (err error) {
 			err = tmpl.ExecuteTemplate(w, ca.HTMLTemplate, map[string]any{"ca": ca, "err": fmt.Sprintf("The SSH CA for the %s is not available", ca.Name)})
 			return
 		}
+		if r.Form.Get("code") != "" {
+			return acsHandler(w, r, ca)
+		}
 		switch pp {
 		case "sign":
 			return sshsignHandler(w, r, ca)
