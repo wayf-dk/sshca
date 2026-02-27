@@ -611,7 +611,7 @@ func sshsignHandler(w http.ResponseWriter, r *http.Request, ca CaConfig) (err er
 	}
 	cert := ssh.MarshalAuthorizedKey(sshCertificate)
 	w.Write(cert)
-	log.Println("sign", string(cert))
+	log.Println("sign", ca.Id, string(cert))
 	return
 }
 
@@ -628,7 +628,7 @@ func sshsignHandlerJSON(w http.ResponseWriter, r *http.Request, ca CaConfig) (er
 	}
 	resJSON, _ := json.Marshal(rec)
 	w.Write(resJSON)
-	log.Println("signJSON", cert)
+	log.Println("signJSON", ca.Id, cert)
 	return
 }
 
@@ -808,10 +808,11 @@ func handleSSHConnection(nConn net.Conn, sshConfig *ssh.ServerConfig) {
 						resources = append(resources, ci.resources[r].Resource)
 						posixUsernames = append(posixUsernames, ci.resources[r].Uid)
 					}
-					cert, err := newCertificate(Config.CaConfigs[ci.ca], publicKey, ci, resources)
+					ca := Config.CaConfigs[ci.ca]
+					cert, err := newCertificate(ca, publicKey, ci, resources)
 					if err == nil {
 						certTxt := string(ssh.MarshalAuthorizedKey(cert))
-						log.Println("ssh", certTxt)
+						log.Println("ssh", ca.Id, certTxt)
 						if cmd == "token2" {
 							res := certRec{
 								SshCert:       certTxt,
