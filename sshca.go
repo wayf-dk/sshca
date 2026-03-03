@@ -106,11 +106,12 @@ type (
 	}
 
 	secretsRec struct {
-		SlotPin                string
-		ServerCert, ServerKey  []byte
+		SlotPin                 string
+		ServerCert, ServerKey   []byte
 		ClientSecrets           map[string]string
 		IntroSpectClientSecrets map[string]string
-	})
+	}
+)
 
 const (
 	SSHFLOW = iota
@@ -207,9 +208,9 @@ func sshcaRouter(w http.ResponseWriter, r *http.Request) (err error) {
 			return
 		}
 		if !ca.OK {
-            if slices.Contains([]string{"sign", "signJSON"}, pp) {
-            	return fmt.Errorf("The SSH CA for the %s is not available", ca.Name)
-            }
+			if slices.Contains([]string{"sign", "signJSON"}, pp) {
+				return fmt.Errorf("The SSH CA for the %s is not available", ca.Name)
+			}
 			err = tmpl.ExecuteTemplate(w, ca.HTMLTemplate, map[string]any{"ca": ca, "err": fmt.Sprintf("The SSH CA for the %s is not available", ca.Name)})
 			return
 		}
@@ -240,7 +241,7 @@ func sshcaRouter(w http.ResponseWriter, r *http.Request) (err error) {
 func prepareCAs() {
 	cas := slices.Sorted(maps.Keys(Config.CaConfigs))
 	for _, k := range cas {
-	    v := Config.CaConfigs[k]
+		v := Config.CaConfigs[k]
 		if v.SSOHost != "" { // neeeded here because we need to look up by host even if the initialization fails
 			Config.CaConfigs[v.SSOHost] = v
 		}
@@ -286,9 +287,9 @@ func prepareCAs() {
 				continue
 			}
 			v.OAuth2Config.ClientSecret = Secrets.ClientSecrets[k]
-    		v.OAuth2Config.Endpoint.AuthURL = op.Authorization
+			v.OAuth2Config.Endpoint.AuthURL = op.Authorization
 			v.OAuth2Config.Endpoint.TokenURL = op.Token
-            v.IntroSpectClientSecret = Secrets.IntroSpectClientSecrets[k]
+			v.IntroSpectClientSecret = Secrets.IntroSpectClientSecrets[k]
 			v.IntroSpectEndpoint = op.Introspect
 		}
 		if v.Signer == nil {
@@ -357,13 +358,14 @@ func (fn appHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func sso2Handler(w http.ResponseWriter, r *http.Request, ca CaConfig) (err error) {
 	verifier := oauth2.GenerateVerifier()
 	token := claimsStore.set("", certInfo{ca: ca.Id, verifier: verifier, eol: time.Now().Add(ssoTTL)})
-	auth := ca.OAuth2Config.AuthCodeURL(token, oauth2.AccessTypeOffline, oauth2.S256ChallengeOption(verifier))
+	var auth strings.Builder
+	auth.WriteString(ca.OAuth2Config.AuthCodeURL(token, oauth2.AccessTypeOffline, oauth2.S256ChallengeOption(verifier)))
 	for _, p := range []string{"idpentityid", "acr_values"} {
 		if pv := r.Form.Get(p); pv != "" {
-			auth += "&" + p + "=" + url.QueryEscape(pv)
+			auth.WriteString("&" + p + "=" + url.QueryEscape(pv))
 		}
 	}
-	http.Redirect(w, r, auth, http.StatusFound)
+	http.Redirect(w, r, auth.String(), http.StatusFound)
 	return
 }
 
