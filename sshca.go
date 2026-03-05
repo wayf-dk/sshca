@@ -56,6 +56,10 @@ type (
 		Permissions ssh.Permissions
 	}
 
+	ClientConfig struct {
+		PublicKey string
+	}
+
 	CaConfig struct {
 		OK, Fake, Hide                               bool
 		SSOHost, Id, Name                            string
@@ -218,6 +222,11 @@ func sshcaRouter(w http.ResponseWriter, r *http.Request) (err error) {
 			return acsHandler(w, r, ca)
 		}
 		switch pp {
+		case "config":
+			jsonTxt, _ := json.Marshal(ClientConfig{PublicKey: ca.PublicKey})
+			w.Header().Add("Content-Type", "application/json")
+			w.Write(jsonTxt)
+			return
 		case "sign":
 			return sshsignHandler(w, r, ca)
 		case "signJSON":
