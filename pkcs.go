@@ -1,4 +1,4 @@
-package github.com/wayf-dk/sshca
+package sshca
 
 import (
 	"fmt"
