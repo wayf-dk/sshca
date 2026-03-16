@@ -951,11 +951,43 @@ func usernameFromPrincipal(principal string, ca CaConfig) (username string) {
 }
 
 func certPP(cert *ssh.Certificate, prefix string) (pp []byte) {
+    // need a handheld json version of the cert - otherwise we get a &json.UnsupportedTypeError{Type:(*reflect.rtype) - likely related to the ExtraData in the Permissions field
+	type sshCert struct {
+		Nonce           []byte
+		Key             string
+		Serial          uint64
+		CertType        uint32
+		KeyId           string
+		ValidPrincipals []string
+		ValidAfter      uint64
+		ValidBefore     uint64
+		CriticalOptions map[string]string
+		Extensions      map[string]string
+		Reserved     []byte
+		SignatureKey string
+		Signature    *ssh.Signature
+	}
+
+	cert2 := sshCert{
+		Nonce:           cert.Nonce,
+		Key:             fmt.Sprintf("%s %s", cert.Key.Type(), base64.RawStdEncoding.EncodeToString(cert.Key.Marshal())),
+		Serial:          cert.Serial,
+		CertType:        cert.CertType,
+		KeyId:           cert.KeyId,
+		ValidPrincipals: cert.ValidPrincipals,
+		ValidAfter:      cert.ValidAfter,
+		ValidBefore:     cert.ValidBefore,
+		CriticalOptions: cert.Permissions.CriticalOptions,
+		Extensions:      cert.Permissions.Extensions,
+		SignatureKey:    fmt.Sprintf("%s %s", cert.SignatureKey.Type(), base64.RawStdEncoding.EncodeToString(cert.SignatureKey.Marshal())),
+		Signature:    cert.Signature,
+	}
+
 	const iso = "2006-01-02T15:04:05"
 	va := time.Unix(int64(cert.ValidAfter), 0).Format(iso)
 	vb := time.Unix(int64(cert.ValidBefore), 0).Format(iso)
-	//hours := rec.cert.ValidBefore - cert.ValidAfter
-	pp, _ = json.MarshalIndent(cert, prefix, "    ")
+	pp, _= json.MarshalIndent(cert2, prefix, "    ")
+//	log.Printf("pp %#v\n%#v\n%s\n", err, cert, string(pp))
 	pp = append([]byte(prefix), pp...) // no prefix on 1st line ???
 	pp = regexp.MustCompile(`("ValidAfter": )(\d+),`).ReplaceAll(pp, []byte(`${1}`+va+`,`))
 	pp = regexp.MustCompile(`("ValidBefore": )(\d+),`).ReplaceAll(pp, []byte(`${1}`+vb+`,`))
