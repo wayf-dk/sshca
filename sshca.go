@@ -986,8 +986,8 @@ func certPP(cert *ssh.Certificate, prefix string) (pp []byte) {
 	const iso = "2006-01-02T15:04:05"
 	va := time.Unix(int64(cert.ValidAfter), 0).Format(iso)
 	vb := time.Unix(int64(cert.ValidBefore), 0).Format(iso)
-	pp, err := json.MarshalIndent(cert2, prefix, "    ")
-	log.Printf("pp %#v\n%#v\n%s\n", err, cert, string(pp))
+	pp, _= json.MarshalIndent(cert2, prefix, "    ")
+//	log.Printf("pp %#v\n%#v\n%s\n", err, cert, string(pp))
 	pp = append([]byte(prefix), pp...) // no prefix on 1st line ???
 	pp = regexp.MustCompile(`("ValidAfter": )(\d+),`).ReplaceAll(pp, []byte(`${1}`+va+`,`))
 	pp = regexp.MustCompile(`("ValidBefore": )(\d+),`).ReplaceAll(pp, []byte(`${1}`+vb+`,`))
