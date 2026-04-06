@@ -222,7 +222,7 @@ func sshcaRouter(w http.ResponseWriter, r *http.Request) (err error) {
 			if slices.Contains([]string{"sign", "signJSON"}, pp) {
 				return fmt.Errorf("The SSH CA for the %s is not available", ca.Name)
 			}
-			err = tmpl.ExecuteTemplate(w, ca.HTMLTemplate, map[string]any{"ca": ca, "err": fmt.Sprintf("The SSH CA for the %s is not available", ca.Name)})
+			err = tmpl.ExecuteTemplate(w, ca.HTMLTemplate, map[string]any{"tmpl": "#err", "ca": ca, "err": fmt.Sprintf("The SSH CA for the %s is not available", ca.Name)})
 			return
 		}
 		if r.Form.Get("code") != "" {
@@ -248,7 +248,7 @@ func sshcaRouter(w http.ResponseWriter, r *http.Request) (err error) {
 		case "acs", "acs2":
 			return acsHandler(w, r, ca)
 		default:
-			err = tmpl.ExecuteTemplate(w, ca.HTMLTemplate, map[string]any{"ca": ca, "rp": Config.RelayingParty, "ri": "//" + r.Host + "/" + ca.Id + "/ri?"})
+			err = tmpl.ExecuteTemplate(w, ca.HTMLTemplate, map[string]any{"tmpl": "#ri", "ca": ca, "rp": Config.RelayingParty, "ri": "//" + r.Host + "/" + ca.Id + "/ri?"})
 			return
 		}
 	}
@@ -554,7 +554,7 @@ func ssoFinalize(w http.ResponseWriter, r *http.Request, token string, ci certIn
 			}
 		}
 		if len(wantedAcrs) > 0 && intersectionEmpty(wantedAcrs, acrs) {
-			tmpl.ExecuteTemplate(w, ca.HTMLTemplate, map[string]any{"err": fmt.Sprintf("No valid AuthnContextClassRef/acr found wanted: %v got: %v", wantedAcrs, acrs)})
+			tmpl.ExecuteTemplate(w, ca.HTMLTemplate, map[string]any{"tmpl": "#err", "err": fmt.Sprintf("No valid AuthnContextClassRef/acr found wanted: %v got: %v", wantedAcrs, acrs)})
 			return
 		}
 		if ci.pw != "" {
@@ -573,7 +573,7 @@ func ssoFinalize(w http.ResponseWriter, r *http.Request, token string, ci certIn
 			return
 		}
 		if ca.ResourcesMandatory && len(ci.resources) == 0 {
-			err = tmpl.ExecuteTemplate(w, ca.HTMLTemplate, map[string]any{"err": "Unfortunately, you do not have access to the EuroHPC Federation Platform."})
+			err = tmpl.ExecuteTemplate(w, ca.HTMLTemplate, map[string]any{"tmpl": "#err", "err": "You do not have any resource entitlements. Please contact helpdesk@my-eurohpc.eu for assistance."})
 			return
 		}
 		feedbackToken := feedbacktokenStore.getFeedbackToken(token)
@@ -585,14 +585,16 @@ func ssoFinalize(w http.ResponseWriter, r *http.Request, token string, ci certIn
 func pwHandler(w http.ResponseWriter, r *http.Request) (err error) {
 	path := strings.Split(r.URL.Path+"//", "/")
 	token := path[2]
+	token = feedbacktokenStore.getTokenFromFeedbacktoken(token)
 	defer r.Body.Close()
 	r.ParseForm()
 	if ci, ok := claimsStore.get(token); ok {
+    	ca := Config.CaConfigs[ci.ca]
 		if ci.pw == r.Form.Get(ci.pwparam) {
 			http.SetCookie(w, &http.Cookie{Name: "pw", Value: ci.pw, Path: "/", Secure: true, HttpOnly: true, MaxAge: 86400, SameSite: http.SameSiteLaxMode})
 			ci.pw = ""
 			claimsStore.set(token, ci)
-			err = tmpl.ExecuteTemplate(w, "certificate", map[string]any{"token": token})
+			err = tmpl.ExecuteTemplate(w, ca.HTMLTemplate, map[string]any{"tmpl": "#issued", "token": token, "ca": ca, "ri": "//" + r.Host + "/" + ca.Id + "/ri?", "resources": ci.resources})
 		} else {
 			ci.pwparam = rand.Text()
 			claimsStore.set(token, ci)
