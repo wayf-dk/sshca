@@ -2,7 +2,7 @@ package main
 
 import (
 	_ "embed"
-	"sshca"
+	"github.com/wayf-dk/sshca"
 )
 
 var (
@@ -21,15 +21,14 @@ func main() {
 		RendevouzTTL:              "1m",
 		SshListenOn:               "localhost:2221",
 		WebListenOn:               "localhost:2280",
+		UseRevProxy:               true,
 
 		CaConfigs: map[string]sshca.CaConfig{
 			"demoCA": {
 				Fake:      true,
 				Name:      "Demo CA",
 				Signer:    signer,
-				ClientConfig: sshca.ClientConfig{
-    				PublicKey: publicKey,
-				},
+				PublicKey: publicKey,
 				CAParams: sshca.CAParams{
 					Ttl: 500,
 				},
