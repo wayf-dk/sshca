@@ -85,16 +85,17 @@ myAccessIDWindow = '{{ .verification_uri }}' && window.open('{{ .verification_ur
 setCurl()
 
 function setCurl() {
-    const t = '{{ .state }}'
+    const token = '{{ .token }}'
+    const feedbacktoken = '{{ .feedbacktoken }}'
     const sshport = '{{ .sshport }}'
 
-    if (t) {
+    if (token) {
         const host = window.location.hostname
-        const getCertCmd = `ssh -p ${sshport} ${window.location.hostname} token ${t}  > ~/.ssh/ssh-ca-demo-cert.pub`
+        const getCertCmd = `ssh -p ${sshport} ${window.location.hostname} token ${token}  > ~/.ssh/ssh-ca-demo-cert.pub`
         const curl = document.querySelector('#curl')
         curl.innerText = getCertCmd
 
-        feedback = new EventSource(`/feedback/${t}`)
+        feedback = new EventSource(`/feedback/${feedbacktoken}`)
         feedback.onmessage = (e) => {
             if (e.data == "timeout") { // timeout is channelless ...
                 feedback.close()
@@ -102,7 +103,8 @@ function setCurl() {
             }
         }
         feedback.addEventListener("certready", (e) => {
-            document.querySelector('#cert').innerText = e.data
+             const info = JSON.parse(e.data)
+            document.querySelector('#cert').innerText = info.cert
             document.querySelector('#manual').style.display = 'none'
             document.querySelector('#auto').style.display = 'block'
             feedback.close()
