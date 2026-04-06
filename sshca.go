@@ -791,12 +791,12 @@ func handleSSHConnection(nConn net.Conn, sshConfig *ssh.ServerConfig) {
 		for req := range reqs {
 			switch req.Type {
 			case "exec":
-				resourcesList := []int{}
 				args := strings.Split(string(req.Payload[4:])+"  ", " ") // always at least 2 elements
 				f1 := flag.NewFlagSet("", flag.ExitOnError)
 				ca := f1.String("ca", "", "")
 				idp := f1.String("idp", "", "")
 				pw := f1.String("pw", "", "")
+				resource := f1.Int("resource", 0, "")
 				f1.Parse(args[1:])
 				token := f1.Arg(0)
 				cmd := args[0]
