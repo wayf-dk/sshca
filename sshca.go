@@ -517,7 +517,7 @@ func riHandler(w http.ResponseWriter, r *http.Request, ca CaConfig) (err error) 
 		data.Set("acr_values", strings.Join(ca.AuthnContextClassRef, " "))
 	}
 
-	http.Redirect(w, r, "//"+ca.SSOHost+"/"+ca.Id+"/sso2?"+data.Encode(), http.StatusFound)
+	http.Redirect(w, r, "//"+ca.SSOHost+"/"+ca.Id+"/sso?"+data.Encode(), http.StatusFound)
 	return
 }
 
