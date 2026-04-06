@@ -131,6 +131,7 @@ var (
 	Secrets     secretsRec
 	tmpl        *template.Template
 	claimsStore = &rendezvous{}
+	feedbacktokenStore = &rendezvous{}
 	funcMap     = template.FuncMap{
 		"PathEscape": url.PathEscape,
 	}
@@ -141,12 +142,14 @@ var (
 	Signer                  ssh.Signer
 )
 
-func Sshca(envJson []byte) {
+func Sshca() {
 	tmpl = template.Must(template.New("ca.template").Funcs(funcMap).Parse(Config.Template))
 	ssoTTL, _ = time.ParseDuration(Config.SSOTTL)
 	rendevouzTTL, _ = time.ParseDuration(Config.RendevouzTTL)
 	claimsStore.ttl = rendevouzTTL
+	feedbacktokenStore.ttl = rendevouzTTL
 	claimsStore.cleanUp()
+	feedbacktokenStore.cleanUp()
 	Config.SshPort = Config.SshListenOn[strings.Index(Config.SshListenOn, ":")+1:]
 	prepareCAs()
 	go sshserver()
@@ -554,19 +557,22 @@ func ssoFinalize(w http.ResponseWriter, r *http.Request, token string, ci certIn
 				ci.pwparam = rand.Text()
 				claimsStore.set(token, ci)
 				http.SetCookie(w, &http.Cookie{Name: "pw", Path: "/", Secure: true, HttpOnly: true, MaxAge: -1, SameSite: http.SameSiteStrictMode})
-				err = tmpl.ExecuteTemplate(w, "pw", map[string]any{"token": token, "pwparam": ci.pwparam})
+    			feedbackToken := feedbacktokenStore.getFeedbackToken(token)
+				err = tmpl.ExecuteTemplate(w, ca.HTMLTemplate, map[string]any{"tmpl": "#pw", "feedbacktoken": feedbackToken, "pwparam": ci.pwparam})
 				return err
 			}
 			ci.pw = ""
 			claimsStore.set(token, ci)
-			err = tmpl.ExecuteTemplate(w, "certificate", map[string]any{"token": token})
+			feedbackToken := feedbacktokenStore.getFeedbackToken(token)
+			err = tmpl.ExecuteTemplate(w, ca.HTMLTemplate, map[string]any{"tmpl": "#issued", "feedbacktoken": feedbackToken, "ca": ca, "ri": "//" + r.Host + "/" + ca.Id + "/ri?", "resources": ci.resources})
 			return
 		}
 		if ca.ResourcesMandatory && len(ci.resources) == 0 {
 			err = tmpl.ExecuteTemplate(w, ca.HTMLTemplate, map[string]any{"err": "Unfortunately, you do not have access to the EuroHPC Federation Platform."})
 			return
 		}
-		err = tmpl.ExecuteTemplate(w, ca.HTMLTemplate, map[string]any{"ci": ci, "ca": ca, "state": token, "sshport": Config.SshPort, "rp": Config.RelayingParty, "ri": "//" + r.Host + "/" + ca.Id + "/ri?", "resources": ci.resources})
+		feedbackToken := feedbacktokenStore.getFeedbackToken(token)
+		err = tmpl.ExecuteTemplate(w, ca.HTMLTemplate, map[string]any{"tmpl": "#cmd,#ri", "ci": ci, "ca": ca, "token": token, "feedbacktoken": feedbackToken, "sshport": Config.SshPort, "rp": Config.RelayingParty, "ri": "//" + r.Host + "/" + ca.Id + "/ri?", "resources": ci.resources})
 	}
 	return
 }
@@ -585,7 +591,8 @@ func pwHandler(w http.ResponseWriter, r *http.Request) (err error) {
 		} else {
 			ci.pwparam = rand.Text()
 			claimsStore.set(token, ci)
-			err = tmpl.ExecuteTemplate(w, "pw", map[string]any{"token": token, "pwparam": ci.pwparam})
+    		feedbackToken := feedbacktokenStore.getFeedbackToken(token)
+			err = tmpl.ExecuteTemplate(w, ca.HTMLTemplate, map[string]any{"tmpl": "#pw", "feedbacktoken": feedbackToken, "pwparam": ci.pwparam})
 		}
 	}
 	return
@@ -594,6 +601,7 @@ func pwHandler(w http.ResponseWriter, r *http.Request) (err error) {
 func feedbackHandler(w http.ResponseWriter, r *http.Request) (err error) {
 	path := strings.Split(r.URL.Path+"//", "/")
 	token := path[2]
+	token = feedbacktokenStore.getTokenFromFeedbacktoken(token)
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -1032,6 +1040,11 @@ type (
 		eol       time.Time
 	}
 
+	feedbackToken struct {
+	    token string
+	    eol   time.Time
+    }
+
 	rendezvous struct {
 		info sync.Map
 		ttl  time.Duration
@@ -1043,11 +1056,19 @@ func (rv *rendezvous) cleanUp() {
 	go func() {
 		for {
 			<-ticker.C
+			now := time.Now()
 			rv.info.Range(func(k, v any) bool {
-				if v.(certInfo).eol.Before(time.Now()) {
-					rv.info.Delete(k)
-				}
-				return true
+				switch vv := v.(type) {
+            	case certInfo:
+                    if vv.eol.Before(now) {
+                        rv.info.Delete(k)
+                    }
+            	case feedbackToken:
+                    if vv.eol.Before(now) {
+                        rv.info.Delete(k)
+                    }
+ 				}
+ 				return true
 			})
 		}
 	}()
@@ -1089,6 +1110,19 @@ func (rv *rendezvous) wait(token string, cond int) (ci certInfo, ok bool) {
 		}
 		<-ticker.C
 	}
+}
+
+func (rv *rendezvous) getFeedbackToken(token string) (feedbacktoken string) {
+    feedbacktoken = rand.Text()
+    rv.info.Store(feedbacktoken, token)
+    return
+}
+
+func (rv *rendezvous) getTokenFromFeedbacktoken(feedbacktoken string) (token string) {
+		if tmp, ok := rv.info.Load(feedbacktoken); ok {
+		    token = tmp.(string)
+		}
+        return
 }
 
 // ssh-agent
