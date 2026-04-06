@@ -990,7 +990,7 @@ func usernameFromPrincipal(principal string, ca CaConfig) (username string) {
 }
 
 func certPP(cert *ssh.Certificate, prefix string) (pp []byte) {
-    // need a handheld json version of the cert - otherwise we get a &json.UnsupportedTypeError{Type:(*reflect.rtype) - likely related to the ExtraData in the Permissions field
+	// need a handheld json version of the cert - otherwise we get a &json.UnsupportedTypeError{Type:(*reflect.rtype) - likely related to the ExtraData in the Permissions field
 	type sshCert struct {
 		Nonce           []byte
 		Key             string
@@ -1002,9 +1002,9 @@ func certPP(cert *ssh.Certificate, prefix string) (pp []byte) {
 		ValidBefore     uint64
 		CriticalOptions map[string]string
 		Extensions      map[string]string
-		Reserved     []byte
-		SignatureKey string
-		Signature    *ssh.Signature
+		Reserved        []byte
+		SignatureKey    string
+		Signature       *ssh.Signature
 	}
 
 	cert2 := sshCert{
@@ -1019,17 +1019,22 @@ func certPP(cert *ssh.Certificate, prefix string) (pp []byte) {
 		CriticalOptions: cert.Permissions.CriticalOptions,
 		Extensions:      cert.Permissions.Extensions,
 		SignatureKey:    fmt.Sprintf("%s %s", cert.SignatureKey.Type(), base64.RawStdEncoding.EncodeToString(cert.SignatureKey.Marshal())),
-		Signature:    cert.Signature,
+		Signature:       cert.Signature,
 	}
+
+    if prefix == "" {
+	    pp, _ = json.Marshal(cert2)
+        return
+    }
 
 	const iso = "2006-01-02T15:04:05"
 	va := time.Unix(int64(cert.ValidAfter), 0).Format(iso)
 	vb := time.Unix(int64(cert.ValidBefore), 0).Format(iso)
-	pp, _= json.MarshalIndent(cert2, prefix, "    ")
-//	log.Printf("pp %#v\n%#v\n%s\n", err, cert, string(pp))
+	pp, _ = json.MarshalIndent(cert2, prefix, "    ")
+	//	log.Printf("pp %#v\n%#v\n%s\n", err, cert, string(pp))
 	pp = append([]byte(prefix), pp...) // no prefix on 1st line ???
-	pp = regexp.MustCompile(`("ValidAfter": )(\d+),`).ReplaceAll(pp, []byte(`${1}`+va+`,`))
-	pp = regexp.MustCompile(`("ValidBefore": )(\d+),`).ReplaceAll(pp, []byte(`${1}`+vb+`,`))
+	pp = regexp.MustCompile(`("ValidAfter": )(\d+),`).ReplaceAll(pp, []byte(`${1}"`+va+`",`))
+	pp = regexp.MustCompile(`("ValidBefore": )(\d+),`).ReplaceAll(pp, []byte(`${1}"`+vb+`",`))
 	return pp
 }
 
