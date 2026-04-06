@@ -904,7 +904,7 @@ func newHostSigner(signer ssh.Signer, keyId string, principals []string) (hostSi
 
 func demoCert(channel ssh.Channel, publicKey ssh.PublicKey) {
 	if cert, ok := publicKey.(*ssh.Certificate); ok {
-		channel.Write(certPP(cert, ""))
+		channel.Write(certPP(cert, " "))
 		io.WriteString(channel, "\n")
 		signatureKey := strings.TrimRight(string(ssh.MarshalAuthorizedKey(cert.SignatureKey)), "\n")
 		signedByUs := false
