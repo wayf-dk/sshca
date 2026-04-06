@@ -1,6 +1,6 @@
 module github.com/wayf-dk/sshca
 
-go 1.25.0
+go 1.26.1
 
 require (
 	github.com/miekg/pkcs11 v1.1.2
