@@ -634,7 +634,13 @@ func feedbackHandler(w http.ResponseWriter, r *http.Request) (err error) {
 			w.(http.Flusher).Flush()
 			continue
 		}
-		fmt.Fprintf(w, "event: certready\n%s\n\n", certPP(ci.cert, "data: "))
+		info := map[string]string{"cert": string(certPP(ci.cert, " "))}
+		if len(ci.resources) > 0 {
+		    info["RESSOURCE"] = ci.resources[0].Resource
+            info["UID"] = ci.resources[0].Uid
+		}
+		infoJson, _ := json.Marshal(info)
+		fmt.Fprintf(w, "event: certready\ndata: %s\n\n", infoJson)
 		w.(http.Flusher).Flush()
 		return
 	}
