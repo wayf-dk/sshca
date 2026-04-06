@@ -33,6 +33,10 @@ import (
 )
 
 type (
+	exitStatusMsg struct {
+		Status uint32
+	}
+
 	Flow   int
 	Claims map[string][]string
 
@@ -784,23 +788,20 @@ func handleSSHConnection(nConn net.Conn, sshConfig *ssh.ServerConfig) {
 				switch cmd {
 				case "demo":
 					demoCert(channel, publicKey)
-					channel.Close()
+					sshExit(channel, "", 0)
 					return
 				case "ca":
 					caConfig, ok := Config.CaConfigs[*ca]
-					if *ca != "" && !ok {
-						io.WriteString(channel, "unknown ca\n")
-						channel.Close()
+					if !ok {
+						sshExit(channel, "unknown ca", 77)
 						return
 					}
 					if !slices.Contains(caConfig.AllowedFlows, SSHFLOW) {
-						io.WriteString(channel, "ssh flow not enabled for this ca\n")
-						channel.Close()
+						sshExit(channel, "ssh flow not enabled for this ca", 77)
 						return
 					}
 					if len(*pw) < 15 {
-						io.WriteString(channel, "pw to short - min 15 chars\n")
-						channel.Close()
+						sshExit(channel, "pw to short - min 15 chars", 77)
 						return
 					}
 					token = claimsStore.set("", certInfo{ca: *ca, idp: *idp, pw: *pw, eol: time.Now().Add(rendevouzTTL)})
@@ -809,32 +810,33 @@ func handleSSHConnection(nConn net.Conn, sshConfig *ssh.ServerConfig) {
 					tmp := strings.Split(strings.Trim(token, " ")+"-", "-") // always at least 2 elements
 					token = tmp[0]
 					if matched, _ := regexp.MatchString(`^[A-Z]?$`, strings.Trim(tmp[1], " ")); !matched {
-						io.WriteString(channel, "unknown resources\n")
-						channel.Close()
+						sshExit(channel, "unknown resources", 77)
 						return
 					}
-					for _, r := range tmp[1] {
-						i := int(r) - int('A')
-						resourcesList = append(resourcesList, i)
+					if tmp[1] != "" {
+						*resource = int(tmp[1][0]) - int('A')
 					}
+				default:
+					sshExit(channel, "service unavailable", 69)
 				}
 				ci, ok := claimsStore.wait(token, principal)
 				if ok && user != "" && ci.cert == nil {
 					posixUsernames := []string{}
 					resources := []string{}
-					for _, r := range resourcesList {
-						if r >= len(ci.resources) {
-							channel.Close()
+					if len(ci.resources) > 0 {
+						if *resource >= len(ci.resources) {
+							sshExit(channel, "", 77)
 							return
 						}
-						resources = append(resources, ci.resources[r].Resource)
-						posixUsernames = append(posixUsernames, ci.resources[r].Uid)
+						resources = append(resources, ci.resources[*resource].Resource)
+						posixUsernames = append(posixUsernames, ci.resources[*resource].Uid)
 					}
 					ca := Config.CaConfigs[ci.ca]
 					cert, err := newCertificate(ca, publicKey, ci, resources)
 					if err == nil {
 						certTxt := string(ssh.MarshalAuthorizedKey(cert))
 						log.Println("ssh", ca.Id, certTxt)
+						log.Println("sshjson", string(certPP(cert, "")))
 						if cmd == "token2" {
 							res := certRec{
 								SshCert:       certTxt,
@@ -846,17 +848,28 @@ func handleSSHConnection(nConn net.Conn, sshConfig *ssh.ServerConfig) {
 						} else {
 							fmt.Fprintf(channel, "%s", certTxt)
 						}
+						// tmpl.ExecuteTemplate(channel.Stderr(), "SSHcmdtemplate", map[string]string{"Port": Config.SshPort, "Resource": resources[0], "Uid": posixUsernames[0]})
 						ci.cert = cert
 						claimsStore.set(token, ci) // for feedback to browser
 					}
 				}
-				channel.Close()
+				sshExit(channel, "", 0)
+				return
 			case "shell":
-				fmt.Fprintf(channel, "%s\n", "Access Denied")
-				channel.Close()
+				sshExit(channel, "", 69)
+				return
 			}
 		}
 	}
+}
+
+func sshExit(ch ssh.Channel, err string, code uint32) {
+	if code != 0 {
+		fmt.Fprintln(ch.Stderr(), err)
+	}
+	ch.SendRequest("exit-status", false, ssh.Marshal(&exitStatusMsg{Status: code}))
+	ch.Close()
+	return
 }
 
 func newHostSigner(signer ssh.Signer, keyId string, principals []string) (hostSigner ssh.Signer, err error) {
@@ -912,6 +925,8 @@ func demoCert(channel ssh.Channel, publicKey ssh.PublicKey) {
 
 		if err := cert.SignatureKey.Verify(bytesForSigning, cert.Signature); err != nil {
 			fmt.Fprintln(channel, "Certificate signature does not verify")
+		}
+		if _, err := channel.SendRequest("exit-status", false, ssh.Marshal(&exitStatusMsg{Status: 11})); err != nil {
 		}
 	}
 }
