@@ -374,7 +374,13 @@ func (fn appHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func ssoHandler(w http.ResponseWriter, r *http.Request, ca CaConfig) (err error) {
 	r.ParseForm()
 	verifier := oauth2.GenerateVerifier()
-	token := claimsStore.set("", certInfo{ca: ca.Id, verifier: verifier, eol: time.Now().Add(ssoTTL)})
+	token := r.Form.Get("state")
+	ci, ok := claimsStore.get(token)
+	if !ok {
+		ci = certInfo{ca: ca.Id, eol: time.Now().Add(ssoTTL)}
+	}
+	ci.verifier = verifier
+	token = claimsStore.set(token, ci)
 	var auth strings.Builder
 	auth.WriteString(ca.OAuth2Config.AuthCodeURL(token, oauth2.AccessTypeOffline, oauth2.S256ChallengeOption(verifier)))
 	for _, p := range []string{"idpentityid", "acr_values"} {
@@ -389,7 +395,8 @@ func ssoHandler(w http.ResponseWriter, r *http.Request, ca CaConfig) (err error)
 func acsHandler(w http.ResponseWriter, r *http.Request, ca CaConfig) (err error) {
 	r.ParseForm()
 	code := r.Form.Get("code")
-	ci, ok := claimsStore.get(r.Form.Get("state"))
+	token := r.Form.Get("state")
+	ci, ok := claimsStore.get(token)
 	if !ok {
 		return errors.New("unknown state")
 	}
@@ -405,7 +412,7 @@ func acsHandler(w http.ResponseWriter, r *http.Request, ca CaConfig) (err error)
 	}
 	// res map[string]interface {}{"error":"invalid_client"}
 	ci.eol = time.Now().Add(rendevouzTTL)
-	token := claimsStore.set("", ci)
+	token = claimsStore.set(token, ci)
 	return ssoFinalize(w, r, token, ci)
 }
 
