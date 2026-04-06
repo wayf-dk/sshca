@@ -243,8 +243,8 @@ func sshcaRouter(w http.ResponseWriter, r *http.Request) (err error) {
 			return
 		case "ri":
 			return riHandler(w, r, ca)
-		case "sso2":
-			return sso2Handler(w, r, ca)
+		case "sso":
+			return ssoHandler(w, r, ca)
 		case "acs", "acs2":
 			return acsHandler(w, r, ca)
 		default:
@@ -371,7 +371,8 @@ func (fn appHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	log.Printf("%s %s %s %+v %1.3f %d %s", remoteAddr, r.Method, r.Host, r.URL, time.Since(starttime).Seconds(), status, err)
 }
 
-func sso2Handler(w http.ResponseWriter, r *http.Request, ca CaConfig) (err error) {
+func ssoHandler(w http.ResponseWriter, r *http.Request, ca CaConfig) (err error) {
+	r.ParseForm()
 	verifier := oauth2.GenerateVerifier()
 	token := claimsStore.set("", certInfo{ca: ca.Id, verifier: verifier, eol: time.Now().Add(ssoTTL)})
 	var auth strings.Builder
