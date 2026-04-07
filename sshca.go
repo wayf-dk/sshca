@@ -636,7 +636,7 @@ func feedbackHandler(w http.ResponseWriter, r *http.Request) (err error) {
 		}
 		info := map[string]string{"cert": string(certPP(ci.cert, " "))}
 		if len(ci.resources) > 0 {
-		    info["RESSOURCE"] = ci.resources[0].Resource
+		    info["RESOURCE"] = ci.resources[0].Resource
             info["UID"] = ci.resources[0].Uid
 		}
 		infoJson, _ := json.Marshal(info)
