@@ -796,7 +796,7 @@ func handleSSHConnection(nConn net.Conn, sshConfig *ssh.ServerConfig) {
 				ca := f1.String("ca", "", "")
 				idp := f1.String("idp", "", "")
 				pw := f1.String("pw", "", "")
-				resource := f1.Int("resource", 0, "")
+				resourceIndex := *f1.Int("resource", 0, "")
 				f1.Parse(args[1:])
 				token := f1.Arg(0)
 				cmd := args[0]
@@ -830,7 +830,7 @@ func handleSSHConnection(nConn net.Conn, sshConfig *ssh.ServerConfig) {
 						return
 					}
 					if tmp[1] != "" {
-						*resource = int(tmp[1][0]) - int('A')
+						resourceIndex = int(tmp[1][0]) - int('A')
 					}
 				default:
 					sshExit(channel, "service unavailable", 69)
@@ -840,19 +840,19 @@ func handleSSHConnection(nConn net.Conn, sshConfig *ssh.ServerConfig) {
 					posixUsernames := []string{}
 					resources := []string{}
 					if len(ci.resources) > 0 {
-						if *resource >= len(ci.resources) {
+						if resourceIndex >= len(ci.resources) {
 							sshExit(channel, "", 77)
 							return
 						}
-						resources = append(resources, ci.resources[*resource].Resource)
-						posixUsernames = append(posixUsernames, ci.resources[*resource].Uid)
+						resources = append(resources, ci.resources[resourceIndex].Resource)
+						posixUsernames = append(posixUsernames, ci.resources[resourceIndex].Uid)
 					}
 					ca := Config.CaConfigs[ci.ca]
 					cert, err := newCertificate(ca, publicKey, ci, resources)
 					if err == nil {
 						certTxt := string(ssh.MarshalAuthorizedKey(cert))
 						log.Println("ssh", ca.Id, certTxt)
-						log.Println("sshjson", string(certPP(cert, "")))
+//						xtralog.Info(string(certPP(cert, "")))
 						if cmd == "token2" {
 							res := certRec{
 								SshCert:       certTxt,
@@ -866,6 +866,7 @@ func handleSSHConnection(nConn net.Conn, sshConfig *ssh.ServerConfig) {
 						}
 						// tmpl.ExecuteTemplate(channel.Stderr(), "SSHcmdtemplate", map[string]string{"Port": Config.SshPort, "Resource": resources[0], "Uid": posixUsernames[0]})
 						ci.cert = cert
+						ci.resources = []resource{ci.resources[resourceIndex]}
 						claimsStore.set(token, ci) // for feedback to browser
 					}
 				}
