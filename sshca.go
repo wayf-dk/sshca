@@ -807,15 +807,19 @@ func handleSSHConnection(nConn net.Conn, sshConfig *ssh.ServerConfig) {
 			switch req.Type {
 			case "exec":
 				args := strings.Split(string(req.Payload[4:])+"  ", " ") // always at least 2 elements
-				f1 := flag.NewFlagSet("", flag.ExitOnError)
+				f1 := flag.NewFlagSet("", flag.ContinueOnError)
 				ca := f1.String("ca", "", "")
 				idp := f1.String("idp", "", "")
 				pw := f1.String("pw", "", "")
-				resourceIndex := *f1.Int("resource", 0, "")
-				f1.Parse(args[1:])
+				resourceIndex := f1.Int("resource", 0, "resource index")
+				flag.CommandLine.SetOutput(channel)
+				f1.Usage = flag.PrintDefaults
+				if err := f1.Parse(args[1:]); err != nil {
+					sshExit(channel, err.Error(), 1)
+					return
+				}
 				token := f1.Arg(0)
 				cmd := args[0]
-				//				fmt.Printf("sshd cmd: %s ca: %s idp: %s pw: %s resource: %s token: %s\n", cmd, *ca, *idp, *pw, *resource, token)
 				switch cmd {
 				case "demo":
 					demoCert(channel, publicKey)
