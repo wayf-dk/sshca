@@ -649,8 +649,8 @@ func feedbackHandler(w http.ResponseWriter, r *http.Request) (err error) {
 		}
 		info := map[string]string{"cert": string(certPP(ci.cert, " "))}
 		if len(ci.resources) > 0 {
-		    info["RESOURCE"] = ci.resources[0].Resource
-            info["UID"] = ci.resources[0].Uid
+			info["RESOURCE"] = ci.resources[0].Resource
+			info["UID"] = ci.resources[0].Uid
 		}
 		infoJson, _ := json.Marshal(info)
 		fmt.Fprintf(w, "event: certready\ndata: %s\n\n", infoJson)
