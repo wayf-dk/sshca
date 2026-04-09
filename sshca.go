@@ -647,7 +647,7 @@ func feedbackHandler(w http.ResponseWriter, r *http.Request) (err error) {
 			w.(http.Flusher).Flush()
 			continue
 		}
-		info := map[string]string{"cert": string(certPP(ci.cert, " "))}
+		info := map[string]string{"cert": string(certPP(ci.cert))}
 		if len(ci.resources) > 0 {
 			info["RESOURCE"] = ci.resources[0].Resource
 			info["UID"] = ci.resources[0].Uid
@@ -921,7 +921,7 @@ func newHostSigner(signer ssh.Signer, keyId string, principals []string) (hostSi
 
 func demoCert(channel ssh.Channel, publicKey ssh.PublicKey) {
 	if cert, ok := publicKey.(*ssh.Certificate); ok {
-		channel.Write(certPP(cert, " "))
+		channel.Write(certPP(cert))
 		io.WriteString(channel, "\n")
 		signatureKey := strings.TrimRight(string(ssh.MarshalAuthorizedKey(cert.SignatureKey)), "\n")
 		signedByUs := false
@@ -1069,17 +1069,12 @@ func certPP(cert *ssh.Certificate) (pp []byte) {
 		Signature:       cert.Signature,
 	}
 
-    if prefix == "" {
-	    pp, _ = json.Marshal(cert2)
-        return
-    }
-
+	pp, _ = json.Marshal(cert2)
 	const iso = "2006-01-02T15:04:05"
 	va := time.Unix(int64(cert.ValidAfter), 0).Format(iso)
 	vb := time.Unix(int64(cert.ValidBefore), 0).Format(iso)
-	pp, _ = json.MarshalIndent(cert2, prefix, "    ")
+	pp, _ = json.MarshalIndent(cert2, "", "    ")
 	//	log.Printf("pp %#v\n%#v\n%s\n", err, cert, string(pp))
-	pp = append([]byte(prefix), pp...) // no prefix on 1st line ???
 	pp = regexp.MustCompile(`("ValidAfter": )(\d+),`).ReplaceAll(pp, []byte(`${1}"`+va+`",`))
 	pp = regexp.MustCompile(`("ValidBefore": )(\d+),`).ReplaceAll(pp, []byte(`${1}"`+vb+`",`))
 	return pp
