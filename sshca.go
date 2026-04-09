@@ -1078,9 +1078,9 @@ type (
 	}
 
 	feedbackToken struct {
-	    token string
-	    eol   time.Time
-    }
+		token string
+		eol   time.Time
+	}
 
 	rendezvous struct {
 		info sync.Map
@@ -1096,16 +1096,16 @@ func (rv *rendezvous) cleanUp() {
 			now := time.Now()
 			rv.info.Range(func(k, v any) bool {
 				switch vv := v.(type) {
-            	case certInfo:
-                    if vv.eol.Before(now) {
-                        rv.info.Delete(k)
-                    }
-            	case feedbackToken:
-                    if vv.eol.Before(now) {
-                        rv.info.Delete(k)
-                    }
- 				}
- 				return true
+				case certInfo:
+					if vv.eol.Before(now) {
+						rv.info.Delete(k)
+					}
+				case feedbackToken:
+					if vv.eol.Before(now) {
+						rv.info.Delete(k)
+					}
+				}
+				return true
 			})
 		}
 	}()
@@ -1150,16 +1150,16 @@ func (rv *rendezvous) wait(token string, cond int) (ci certInfo, ok bool) {
 }
 
 func (rv *rendezvous) getFeedbackToken(token string) (feedbacktoken string) {
-    feedbacktoken = rand.Text()
-    rv.info.Store(feedbacktoken, token)
-    return
+	feedbacktoken = rand.Text()
+	rv.info.Store(feedbacktoken, token)
+	return
 }
 
 func (rv *rendezvous) getTokenFromFeedbacktoken(feedbacktoken string) (token string) {
-		if tmp, ok := rv.info.Load(feedbacktoken); ok {
-		    token = tmp.(string)
-		}
-        return
+	if tmp, ok := rv.info.Load(feedbacktoken); ok {
+		token = tmp.(string)
+	}
+	return
 }
 
 // ssh-agent
