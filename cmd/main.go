@@ -2,6 +2,7 @@ package main
 
 import (
 	_ "embed"
+	"os"
 	"github.com/wayf-dk/sshca"
 )
 
@@ -21,6 +22,7 @@ func main() {
 		RendevouzTTL:              "1m",
 		SshListenOn:               "localhost:2221",
 		WebListenOn:               "localhost:2280",
+		SshPort:                   "2221",
 		UseRevProxy:               true,
 
 		CaConfigs: map[string]sshca.CaConfig{
@@ -38,6 +40,7 @@ func main() {
 			},
 		},
 	}
-
+    hostName, _ := os.Hostname()
+    sshca.Host2PortRec = map[string]string{hostName: "2221",}
 	sshca.Sshca()
 }
