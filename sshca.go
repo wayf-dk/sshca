@@ -720,8 +720,8 @@ func sshsign(w http.ResponseWriter, r *http.Request, ca CaConfig) (sshCertificat
 	}
 	res = resources[i]
 
-	ci := certInfo{ca: ca.Id, claims: claims, resources: resources}
-	sshCertificate, err = newCertificate(ca, publicKey, ci, []string{params.Resource})
+	ci := certInfo{ca: ca.Id, claims: claims, resources: []resource{res}}
+	sshCertificate, err = newCertificate(ca, publicKey, ci)
 	if err != nil {
 		return
 	}
@@ -964,13 +964,13 @@ func demoCert(channel ssh.Channel, publicKey ssh.PublicKey) {
 	}
 }
 
-func newCertificate(ca CaConfig, pubkey ssh.PublicKey, ci certInfo, resources []string) (cert *ssh.Certificate, err error) {
+func newCertificate(ca CaConfig, pubkey ssh.PublicKey, ci certInfo) (cert *ssh.Certificate, err error) {
 	if _, ok := pubkey.(*ssh.Certificate); ok {
 		pubkey = pubkey.(*ssh.Certificate).Key
 	}
 	params := ca.CAParams
-	if len(resources) > 0 {
-		res, _ := json.Marshal(resources)
+	if len(ci.resources) > 0 {
+		res, _ := json.Marshal([]string{ci.resources[0].Resource})
 		params.Permissions.Extensions = maps.Clone(params.Permissions.Extensions)
 		// arams.Permissions.Extensions["ssh-domain-grant@core.aai.geant.org"+res] = "" //`["` + res + `"]` // experiment with data as key - lets ssh-keyget -L -f - show it as text
 		params.Permissions.Extensions["ssh-domain-grant@core.aai.geant.org"] = string(res)
