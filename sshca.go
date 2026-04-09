@@ -569,7 +569,7 @@ func ssoFinalize(w http.ResponseWriter, r *http.Request, token string, ci certIn
 				ci.pwparam = rand.Text()
 				claimsStore.set(token, ci)
 				http.SetCookie(w, &http.Cookie{Name: "pw", Path: "/", Secure: true, HttpOnly: true, MaxAge: -1, SameSite: http.SameSiteStrictMode})
-    			feedbackToken := feedbacktokenStore.getFeedbackToken(token)
+				feedbackToken := feedbacktokenStore.getFeedbackToken(token)
 				err = tmpl.ExecuteTemplate(w, ca.HTMLTemplate, map[string]any{"tmpl": "#pw", "feedbacktoken": feedbackToken, "pwparam": ci.pwparam})
 				return err
 			}
@@ -596,7 +596,7 @@ func pwHandler(w http.ResponseWriter, r *http.Request) (err error) {
 	defer r.Body.Close()
 	r.ParseForm()
 	if ci, ok := claimsStore.get(token); ok {
-    	ca := Config.CaConfigs[ci.ca]
+		ca := Config.CaConfigs[ci.ca]
 		if ci.pw == r.Form.Get(ci.pwparam) {
 			http.SetCookie(w, &http.Cookie{Name: "pw", Value: ci.pw, Path: "/", Secure: true, HttpOnly: true, MaxAge: 86400, SameSite: http.SameSiteLaxMode})
 			ci.pw = ""
@@ -605,7 +605,7 @@ func pwHandler(w http.ResponseWriter, r *http.Request) (err error) {
 		} else {
 			ci.pwparam = rand.Text()
 			claimsStore.set(token, ci)
-    		feedbackToken := feedbacktokenStore.getFeedbackToken(token)
+			feedbackToken := feedbacktokenStore.getFeedbackToken(token)
 			err = tmpl.ExecuteTemplate(w, ca.HTMLTemplate, map[string]any{"tmpl": "#pw", "feedbacktoken": feedbackToken, "pwparam": ci.pwparam})
 		}
 	}
