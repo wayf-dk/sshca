@@ -867,18 +867,7 @@ func handleSSHConnection(nConn net.Conn, sshConfig *ssh.ServerConfig) {
 					if err == nil {
 						certTxt := string(ssh.MarshalAuthorizedKey(cert))
 						log.Println("ssh", ca.Id, certTxt)
-//						xtralog.Info(string(certPP(cert, "")))
-						if cmd == "token2" {
-							res := certRec{
-								SshCert:       certTxt,
-								Resource:      resources[0],
-								PosixUsername: posixUsernames[0],
-							}
-							resJSON, _ := json.Marshal(res)
-							fmt.Fprintf(channel, "%s\n", resJSON)
-						} else {
-							fmt.Fprintf(channel, "%s", certTxt)
-						}
+						fmt.Fprintf(channel, "%s", certTxt)
 						xtralog.Info(certForEFP(cert, ca, "ssh"))
 						// tmpl.ExecuteTemplate(channel.Stderr(), "SSHcmdtemplate", map[string]string{"Port": Config.SshPort, "Resource": resources[0], "Uid": posixUsernames[0]})
 						ci.cert = cert
