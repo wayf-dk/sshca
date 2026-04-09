@@ -849,25 +849,22 @@ func handleSSHConnection(nConn net.Conn, sshConfig *ssh.ServerConfig) {
 						return
 					}
 					if tmp[1] != "" {
-						resourceIndex = int(tmp[1][0]) - int('A')
+						*resourceIndex = int(tmp[1][0]) - int('A')
 					}
 				default:
 					sshExit(channel, "service unavailable", 69)
 				}
 				ci, ok := claimsStore.wait(token, principal)
 				if ok && user != "" && ci.cert == nil {
-					posixUsernames := []string{}
-					resources := []string{}
 					if len(ci.resources) > 0 {
-						if resourceIndex >= len(ci.resources) {
+						if *resourceIndex >= len(ci.resources) {
 							sshExit(channel, "", 77)
 							return
 						}
-						resources = append(resources, ci.resources[resourceIndex].Resource)
-						posixUsernames = append(posixUsernames, ci.resources[resourceIndex].Uid)
+						ci.resources = []resource{ci.resources[*resourceIndex]}
 					}
 					ca := Config.CaConfigs[ci.ca]
-					cert, err := newCertificate(ca, publicKey, ci, resources)
+					cert, err := newCertificate(ca, publicKey, ci)
 					if err == nil {
 						certTxt := string(ssh.MarshalAuthorizedKey(cert))
 						log.Println("ssh", ca.Id, certTxt)
@@ -875,7 +872,6 @@ func handleSSHConnection(nConn net.Conn, sshConfig *ssh.ServerConfig) {
 						xtralog.Info(certForEFP(cert, ca, "ssh"))
 						// tmpl.ExecuteTemplate(channel.Stderr(), "SSHcmdtemplate", map[string]string{"Port": Config.SshPort, "Resource": resources[0], "Uid": posixUsernames[0]})
 						ci.cert = cert
-						ci.resources = []resource{ci.resources[resourceIndex]}
 						claimsStore.set(token, ci) // for feedback to browser
 					}
 				}
