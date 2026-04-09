@@ -15,6 +15,7 @@ import (
 	"html/template"
 	"io"
 	"log"
+	"log/syslog"
 	"maps"
 	"net"
 	"net/http"
@@ -131,12 +132,13 @@ var (
 		"ssh-ed25519-cert-v01@openssh.com": true,
 		"ssh-ed25519":                      true,
 	}
-	Config      Conf
-	Secrets     secretsRec
-	tmpl        *template.Template
-	claimsStore = &rendezvous{}
+	Config             Conf
+	Host2PortRec       map[string]string
+	Secrets            secretsRec
+	tmpl               *template.Template
+	claimsStore        = &rendezvous{}
 	feedbacktokenStore = &rendezvous{}
-	funcMap     = template.FuncMap{
+	funcMap            = template.FuncMap{
 		"PathEscape": url.PathEscape,
 	}
 	ssoTTL, rendevouzTTL    time.Duration
@@ -144,9 +146,16 @@ var (
 	hostCertTTL, _          = time.ParseDuration("720h")
 	PublicKey               string
 	Signer                  ssh.Signer
+	xtralog                 *syslog.Writer
 )
 
 func Sshca() {
+	var err error
+	xtralog, err = syslog.Dial("", "", syslog.LOG_INFO|syslog.LOG_LOCAL7, "sshca2efp")
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	tmpl = template.Must(template.New("ca.template").Funcs(funcMap).Parse(Config.Template))
 	ssoTTL, _ = time.ParseDuration(Config.SSOTTL)
 	rendevouzTTL, _ = time.ParseDuration(Config.RendevouzTTL)
@@ -154,7 +163,11 @@ func Sshca() {
 	feedbacktokenStore.ttl = rendevouzTTL
 	claimsStore.cleanUp()
 	feedbacktokenStore.cleanUp()
-	Config.SshPort = Config.SshListenOn[strings.Index(Config.SshListenOn, ":")+1:]
+	hostName, _ := os.Hostname()
+	if sshport, ok := Host2PortRec[hostName]; ok {
+    	Config.SshPort = sshport
+    }
+	fmt.Printf("ssh frontendport: %s on host: %s\n", Config.SshPort, hostName)
 	prepareCAs()
 	go sshserver()
 
@@ -654,6 +667,7 @@ func sshsignHandler(w http.ResponseWriter, r *http.Request, ca CaConfig) (err er
 	cert := ssh.MarshalAuthorizedKey(sshCertificate)
 	w.Write(cert)
 	log.Println("sign", ca.Id, string(cert))
+	xtralog.Info(certForEFP(sshCertificate, ca, "sign"))
 	return
 }
 
@@ -671,6 +685,7 @@ func sshsignHandlerJSON(w http.ResponseWriter, r *http.Request, ca CaConfig) (er
 	resJSON, _ := json.Marshal(rec)
 	w.Write(resJSON)
 	log.Println("signJSON", ca.Id, cert)
+	xtralog.Info(certForEFP(sshCertificate, ca, "signJSON"))
 	return
 }
 
@@ -864,6 +879,7 @@ func handleSSHConnection(nConn net.Conn, sshConfig *ssh.ServerConfig) {
 						} else {
 							fmt.Fprintf(channel, "%s", certTxt)
 						}
+						xtralog.Info(certForEFP(cert, ca, "ssh"))
 						// tmpl.ExecuteTemplate(channel.Stderr(), "SSHcmdtemplate", map[string]string{"Port": Config.SshPort, "Resource": resources[0], "Uid": posixUsernames[0]})
 						ci.cert = cert
 						ci.resources = []resource{ci.resources[resourceIndex]}
@@ -990,7 +1006,37 @@ func usernameFromPrincipal(principal string, ca CaConfig) (username string) {
 	return
 }
 
-func certPP(cert *ssh.Certificate, prefix string) (pp []byte) {
+func certForEFP(cert *ssh.Certificate, ca CaConfig, method string) string {
+	type sshCert struct {
+		Env             string
+		Method          string
+		Serial          uint64
+		CertType        uint32
+		KeyId           string
+		ValidPrincipals []string
+		ValidAfter      uint64
+		ValidBefore     uint64
+		CriticalOptions map[string]string
+		Extensions      map[string]string
+	}
+
+	cert2 := sshCert{
+		Env:             ca.Id,
+		Method:          method,
+		Serial:          cert.Serial,
+		CertType:        cert.CertType,
+		KeyId:           cert.KeyId,
+		ValidPrincipals: cert.ValidPrincipals,
+		ValidAfter:      cert.ValidAfter,
+		ValidBefore:     cert.ValidBefore,
+		CriticalOptions: cert.Permissions.CriticalOptions,
+		Extensions:      cert.Permissions.Extensions,
+	}
+	tmp, _ := json.Marshal(cert2)
+	return string(tmp)
+}
+
+func certPP(cert *ssh.Certificate) (pp []byte) {
 	// need a handheld json version of the cert - otherwise we get a &json.UnsupportedTypeError{Type:(*reflect.rtype) - likely related to the ExtraData in the Permissions field
 	type sshCert struct {
 		Nonce           []byte
