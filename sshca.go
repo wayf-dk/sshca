@@ -997,7 +997,7 @@ func usernameFromPrincipal(principal string, ca CaConfig) (username string) {
 
 func certForEFP(cert *ssh.Certificate, ca CaConfig, method string) string {
 	type sshCert struct {
-		Env             string
+		Ca              string
 		Method          string
 		Serial          uint64
 		CertType        uint32
@@ -1010,7 +1010,7 @@ func certForEFP(cert *ssh.Certificate, ca CaConfig, method string) string {
 	}
 
 	cert2 := sshCert{
-		Env:             ca.Id,
+		Ca:              ca.Id,
 		Method:          method,
 		Serial:          cert.Serial,
 		CertType:        cert.CertType,
