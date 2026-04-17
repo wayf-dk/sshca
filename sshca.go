@@ -151,7 +151,7 @@ var (
 
 func Sshca() {
 	var err error
-	xtralog, err = syslog.Dial("", "", syslog.LOG_INFO|syslog.LOG_LOCAL7, "sshca2efp")
+	xtralog, err = syslog.Dial("", "", syslog.LOG_INFO|syslog.LOG_LOCAL7, "sshcalog")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -660,19 +660,19 @@ func feedbackHandler(w http.ResponseWriter, r *http.Request) (err error) {
 }
 
 func sshsignHandler(w http.ResponseWriter, r *http.Request, ca CaConfig) (err error) {
-	sshCertificate, _, err := sshsign(w, r, ca)
+	sshCertificate, _, srcAddr, err := sshsign(w, r, ca)
 	if err != nil {
 		return
 	}
 	cert := ssh.MarshalAuthorizedKey(sshCertificate)
 	w.Write(cert)
 	log.Println("sign", ca.Id, string(cert))
-	xtralog.Info(certForEFP(sshCertificate, ca, "sign"))
+	xtralog.Info(certForLog(sshCertificate, ca, "sign",srcAddr))
 	return
 }
 
 func sshsignHandlerJSON(w http.ResponseWriter, r *http.Request, ca CaConfig) (err error) {
-	sshCertificate, res, err := sshsign(w, r, ca)
+	sshCertificate, res, srcAddr, err := sshsign(w, r, ca)
 	if err != nil {
 		return
 	}
@@ -685,11 +685,11 @@ func sshsignHandlerJSON(w http.ResponseWriter, r *http.Request, ca CaConfig) (er
 	resJSON, _ := json.Marshal(rec)
 	w.Write(resJSON)
 	log.Println("signJSON", ca.Id, cert)
-	xtralog.Info(certForEFP(sshCertificate, ca, "signJSON"))
+	xtralog.Info(certForLog(sshCertificate, ca, "signJSON", srcAddr))
 	return
 }
 
-func sshsign(w http.ResponseWriter, r *http.Request, ca CaConfig) (sshCertificate *ssh.Certificate, res resource, err error) {
+func sshsign(w http.ResponseWriter, r *http.Request, ca CaConfig) (sshCertificate *ssh.Certificate, res resource, srcAddr string, err error) {
 	params := myAccessIdParams{}
 	defer r.Body.Close()
 	r.ParseForm()
@@ -724,6 +724,10 @@ func sshsign(w http.ResponseWriter, r *http.Request, ca CaConfig) (sshCertificat
 	sshCertificate, err = newCertificate(ca, publicKey, ci)
 	if err != nil {
 		return
+	}
+	srcAddr = r.RemoteAddr
+	if xff := r.Header.Get("X-Forwarded-For"); xff != ""  {
+		srcAddr = xff
 	}
 	return
 }
@@ -869,7 +873,7 @@ func handleSSHConnection(nConn net.Conn, sshConfig *ssh.ServerConfig) {
 						certTxt := string(ssh.MarshalAuthorizedKey(cert))
 						log.Println("ssh", ca.Id, certTxt)
 						fmt.Fprintf(channel, "%s", certTxt)
-						xtralog.Info(certForEFP(cert, ca, "ssh"))
+						xtralog.Info(certForLog(cert, ca, "ssh", nConn.RemoteAddr().String()))
 						// tmpl.ExecuteTemplate(channel.Stderr(), "SSHcmdtemplate", map[string]string{"Port": Config.SshPort, "Resource": resources[0], "Uid": posixUsernames[0]})
 						ci.cert = cert
 						claimsStore.set(token, ci) // for feedback to browser
@@ -995,10 +999,11 @@ func usernameFromPrincipal(principal string, ca CaConfig) (username string) {
 	return
 }
 
-func certForEFP(cert *ssh.Certificate, ca CaConfig, method string) string {
+func certForLog(cert *ssh.Certificate, ca CaConfig, method, srcAddr string) string {
 	type sshCert struct {
 		Ca              string
 		Method          string
+		SrcAddr         string
 		Serial          uint64
 		CertType        uint32
 		KeyId           string
@@ -1012,6 +1017,7 @@ func certForEFP(cert *ssh.Certificate, ca CaConfig, method string) string {
 	cert2 := sshCert{
 		Ca:              ca.Id,
 		Method:          method,
+		SrcAddr:         srcAddr,
 		Serial:          cert.Serial,
 		CertType:        cert.CertType,
 		KeyId:           cert.KeyId,
