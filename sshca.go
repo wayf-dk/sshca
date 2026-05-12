@@ -1310,3 +1310,28 @@ func getEFPResources(namespace string, values []string) (resources []resource) {
 	}
 	return
 }
+
+// Source - https://stackoverflow.com/a/26198216
+// Posted by joshlf
+// Retrieved 2026-05-05, License - CC BY-SA 3.0
+
+type bufferedConn struct {
+	r        *bufio.Reader
+	net.Conn // So that most methods are embedded
+}
+
+func newBufferedConn(c net.Conn) bufferedConn {
+	return bufferedConn{bufio.NewReader(c), c}
+}
+
+func newBufferedConnSize(c net.Conn, n int) bufferedConn {
+	return bufferedConn{bufio.NewReaderSize(c, n), c}
+}
+
+func (b bufferedConn) Peek(n int) ([]byte, error) {
+	return b.r.Peek(n)
+}
+
+func (b bufferedConn) Read(p []byte) (int, error) {
+	return b.r.Read(p)
+}
