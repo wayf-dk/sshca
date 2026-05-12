@@ -127,6 +127,8 @@ type (
 const (
 	SSHFLOW = iota
 	WEBFLOW
+	DOSSH
+	DOJSON
 )
 
 var (
@@ -151,7 +153,8 @@ var (
 	xtralog                 *syslog.Writer
 )
 
-func Sshca() {
+func Sshca(commit string) {
+	fmt.Println(commit)
 	var err error
 	xtralog, err = syslog.Dial("", "", syslog.LOG_INFO|syslog.LOG_LOCAL7, "sshcalog")
 	if err != nil {
@@ -167,8 +170,8 @@ func Sshca() {
 	feedbacktokenStore.cleanUp()
 	hostName, _ := os.Hostname()
 	if sshport, ok := Host2PortRec[hostName]; ok {
-    	Config.SshPort = sshport
-    }
+		Config.SshPort = sshport
+	}
 	fmt.Printf("ssh frontendport: %s on host: %s\n", Config.SshPort, hostName)
 	prepareCAs()
 	go sshserver()
@@ -250,9 +253,9 @@ func sshcaRouter(w http.ResponseWriter, r *http.Request) (err error) {
 			w.Write(jsonTxt)
 			return
 		case "sign":
-			return sshsignHandler(w, r, ca)
+			return sshsignHandler(w, r, ca, DOSSH)
 		case "signJSON":
-			return sshsignHandlerJSON(w, r, ca)
+			return sshsignHandler(w, r, ca, DOJSON)
 		case "mindthegap":
 			http.ServeFileFS(w, r, Config.WWW, "/www/mindthegap.html")
 			return
@@ -665,37 +668,8 @@ func feedbackHandler(w http.ResponseWriter, r *http.Request) (err error) {
 	}
 }
 
-func sshsignHandler(w http.ResponseWriter, r *http.Request, ca CaConfig) (err error) {
-	sshCertificate, _, srcAddr, err := sshsign(w, r, ca)
-	if err != nil {
-		return
-	}
-	cert := ssh.MarshalAuthorizedKey(sshCertificate)
-	w.Write(cert)
-	log.Println("sign", ca.Id, string(cert))
-	xtralog.Info(certForLog(sshCertificate, ca, "sign",srcAddr))
-	return
-}
-
-func sshsignHandlerJSON(w http.ResponseWriter, r *http.Request, ca CaConfig) (err error) {
-	sshCertificate, res, srcAddr, err := sshsign(w, r, ca)
-	if err != nil {
-		return
-	}
-	cert := string(ssh.MarshalAuthorizedKey(sshCertificate))
-	rec := certRec{
-		SshCert:       cert,
-		Resource:      res.Resource,
-		PosixUsername: res.Uid,
-	}
-	resJSON, _ := json.Marshal(rec)
-	w.Write(resJSON)
-	log.Println("signJSON", ca.Id, cert)
-	xtralog.Info(certForLog(sshCertificate, ca, "signJSON", srcAddr))
-	return
-}
-
-func sshsign(w http.ResponseWriter, r *http.Request, ca CaConfig) (sshCertificate *ssh.Certificate, res resource, srcAddr string, err error) {
+func sshsignHandler(w http.ResponseWriter, r *http.Request, ca CaConfig, returnType int) (err error) {
+	start := time.Now()
 	params := myAccessIdParams{}
 	defer r.Body.Close()
 	r.ParseForm()
@@ -713,28 +687,46 @@ func sshsign(w http.ResponseWriter, r *http.Request, ca CaConfig) (sshCertificat
 	if err != nil {
 		return
 	}
-
+	start2 := time.Now()
 	claims, resources, err := getUserInfo(params.OTT, ca)
 	if err != nil {
 		return
 	}
-
+	intro := time.Since(start2)
 	i := slices.IndexFunc(resources, func(r resource) bool { return r.Resource == params.Resource })
 	if i < 0 { // no resources from getUserIfo -> no access
 		err = fmt.Errorf("unknown resource %s", params.Resource)
 		return
 	}
-	res = resources[i]
+	res := resources[i]
 
 	ci := certInfo{ca: ca.Id, claims: claims, resources: []resource{res}}
-	sshCertificate, err = newCertificate(ca, publicKey, ci)
+	sshCertificate, err := newCertificate(ca, publicKey, ci)
 	if err != nil {
-		return
+		return err
 	}
-	srcAddr = r.RemoteAddr
-	if xff := r.Header.Get("X-Forwarded-For"); xff != ""  {
+	srcAddr := r.RemoteAddr
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
 		srcAddr = xff
 	}
+	cert := ssh.MarshalAuthorizedKey(sshCertificate)
+
+	switch returnType { // handle /www /feedback /sso
+	case DOJSON:
+		rec := certRec{
+			SshCert:       string(cert),
+			Resource:      res.Resource,
+			PosixUsername: res.Uid,
+		}
+		resJSON, _ := json.Marshal(rec)
+		w.Write(resJSON)
+		log.Println("signJSON", ca.Id, cert)
+	case DOSSH:
+		w.Write(cert)
+		log.Println("sign", ca.Id, string(cert))
+	}
+	tp := map[int]string{DOSSH: "sign", DOJSON: "signJSON"}
+	xtralog.Info(certForLog(sshCertificate, ca, tp[returnType], srcAddr, time.Since(start), intro, 0))
 	return
 }
 
@@ -743,7 +735,6 @@ func sshserver() {
 		Config: ssh.Config{
 			MACs: ssh.SupportedAlgorithms().MACs,
 		},
-		// Remove to disable public key auth.
 		PublicKeyCallback: func(c ssh.ConnMetadata, pubKey ssh.PublicKey) (*ssh.Permissions, error) {
 			if !allowedKeyTypes[pubKey.Type()] {
 				return nil, errors.New("xxx")
