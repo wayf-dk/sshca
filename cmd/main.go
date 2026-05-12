@@ -42,5 +42,5 @@ func main() {
 	}
     hostName, _ := os.Hostname()
     sshca.Host2PortRec = map[string]string{hostName: "2221",}
-	sshca.Sshca()
+	sshca.Sshca("demo")
 }
