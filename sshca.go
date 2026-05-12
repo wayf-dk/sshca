@@ -782,7 +782,34 @@ func sshserver() {
 }
 
 func handleSSHConnection(nConn net.Conn, sshConfig *ssh.ServerConfig) {
-	conn, chans, reqs, err := ssh.NewServerConn(nConn, sshConfig)
+	srcAddr := ""
+	nBuff := newBufferedConn(nConn)
+	// See if we got at haproxy header "PROXY TCP4 255.255.255.255 255.255.255.255 65535 65535\r\n"
+	buf, err := nBuff.Peek(6)
+	if bytes.HasPrefix(buf, []byte("PROXY ")) {
+		proxyheader := make([]byte, 0, 256) // max SSH header PROXY header is max 180
+		i := 5
+		for {
+			buf, err := nBuff.Peek(i)
+			if err != nil {
+				nBuff.Close()
+				return
+			}
+			if buf[i-1] == '\n' {
+				proxyheader = buf
+				nBuff.r.Discard(i)
+				break
+			}
+			i++
+		}
+		re := regexp.MustCompile(`^PROXY TCP4 ((\d{1,3}\.?){4}) ((\d{1,3}\.?){4}) (\d+) (\d+)`)
+		matched := re.FindAllSubmatch(proxyheader, -1)
+		if len(matched) > 0 {
+			srcAddr = string(matched[0][1])
+		}
+	}
+
+	conn, chans, reqs, err := ssh.NewServerConn(nBuff, sshConfig)
 	if err != nil {
 		log.Println("failed to handshake: ", err)
 		return
