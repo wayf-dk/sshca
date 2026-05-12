@@ -416,6 +416,7 @@ func acsHandler(w http.ResponseWriter, r *http.Request, ca CaConfig) (err error)
 		return errors.New("unknown state")
 	}
 
+	ci.st = time.Now()
 	ctx := context.Background()
 	tok, err := ca.OAuth2Config.Exchange(ctx, code, oauth2.VerifierOption(ci.verifier))
 	if err != nil {
@@ -427,6 +428,7 @@ func acsHandler(w http.ResponseWriter, r *http.Request, ca CaConfig) (err error)
 	}
 	// res map[string]interface {}{"error":"invalid_client"}
 	ci.eol = time.Now().Add(rendevouzTTL)
+	ci.i = time.Since(ci.st)
 	token = claimsStore.set(token, ci)
 	return ssoFinalize(w, r, token, ci)
 }
@@ -600,6 +602,8 @@ func ssoFinalize(w http.ResponseWriter, r *http.Request, token string, ci certIn
 		}
 		feedbackToken := feedbacktokenStore.getFeedbackToken(token)
 		err = tmpl.ExecuteTemplate(w, ca.HTMLTemplate, map[string]any{"tmpl": "#cmd,#ri", "ci": ci, "ca": ca, "token": token, "feedbacktoken": feedbackToken, "sshport": Config.SshPort, "rp": Config.RelayingParty, "ri": "//" + r.Host + "/" + ca.Id + "/ri?", "resources": ci.resources})
+		ci.w = time.Since(ci.st)
+		claimsStore.set(token, ci)
 	}
 	return
 }
@@ -902,7 +906,7 @@ func handleSSHConnection(nConn net.Conn, sshConfig *ssh.ServerConfig) {
 						certTxt := string(ssh.MarshalAuthorizedKey(cert))
 						log.Println("ssh", ca.Id, certTxt)
 						fmt.Fprintf(channel, "%s", certTxt)
-						xtralog.Info(certForLog(cert, ca, "ssh", nConn.RemoteAddr().String()))
+						xtralog.Info(certForLog(cert, ca, "ssh", srcAddr, ci.w, ci.i, time.Since(ci.st)))
 						// tmpl.ExecuteTemplate(channel.Stderr(), "SSHcmdtemplate", map[string]string{"Port": Config.SshPort, "Resource": resources[0], "Uid": posixUsernames[0]})
 						ci.cert = cert
 						claimsStore.set(token, ci) // for feedback to browser
@@ -1028,11 +1032,12 @@ func usernameFromPrincipal(principal string, ca CaConfig) (username string) {
 	return
 }
 
-func certForLog(cert *ssh.Certificate, ca CaConfig, method, srcAddr string) string {
+func certForLog(cert *ssh.Certificate, ca CaConfig, method, srcAddr string, w, i, s time.Duration) string {
 	type sshCert struct {
 		Ca              string
 		Method          string
 		SrcAddr         string
+		W, I, S         int64
 		Serial          uint64
 		CertType        uint32
 		KeyId           string
@@ -1047,6 +1052,9 @@ func certForLog(cert *ssh.Certificate, ca CaConfig, method, srcAddr string) stri
 		Ca:              ca.Id,
 		Method:          method,
 		SrcAddr:         srcAddr,
+		W:               w.Milliseconds(),
+		I:               i.Milliseconds(),
+		S:               s.Milliseconds(),
 		Serial:          cert.Serial,
 		CertType:        cert.CertType,
 		KeyId:           cert.KeyId,
@@ -1140,6 +1148,8 @@ type (
 		resources []resource
 		cert      *ssh.Certificate
 		eol       time.Time
+		st        time.Time
+		w, i, s   time.Duration
 	}
 
 	feedbackToken struct {
