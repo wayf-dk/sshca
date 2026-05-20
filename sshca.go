@@ -278,6 +278,7 @@ func prepareCAs() {
 		v := Config.CaConfigs[k]
 		if v.SSOHost != "" { // neeeded here because we need to look up by host even if the initialization fails
 			Config.CaConfigs[v.SSOHost] = v
+			Config.HostCertificatePrincipals = append(Config.HostCertificatePrincipals, v.SSOHost)
 		}
 		if v.HTMLTemplate == "" {
 			v.HTMLTemplate = Config.HTMLTemplate
