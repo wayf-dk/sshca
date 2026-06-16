@@ -85,6 +85,7 @@ type (
 		Op, Iop                                      Opconfig   `json:"-"`
 		Signer                                       ssh.Signer `json:"-"`
 		MandatoryClaims, Claims                      map[string]string
+		Resources                                    ResourceMap
 	}
 
 	Conf struct {
@@ -103,6 +104,14 @@ type (
 		Slot                       string
 		NoOfSessions               int
 	}
+
+	Resource struct {
+		Resource, Uid string
+		DisplayName, SSHTemplate string
+		PosixPrincipal bool
+	}
+
+	ResourceMap map[string]Resource
 
 	myAccessIdParams struct {
 		PublicKey string // don't use []byte - will be json interpreted as base64
@@ -437,7 +446,7 @@ func acsHandler(w http.ResponseWriter, r *http.Request, ca CaConfig) (err error)
 	return ssoFinalize(w, r, token, ci)
 }
 
-func getUserInfo(token string, ca CaConfig) (claims Claims, resources []resource, err error) {
+func getUserInfo(token string, ca CaConfig) (claims Claims, resources []Resource, err error) {
 	data := url.Values{}
 	data.Set("token", token)
 	data.Set("client_id", ca.OAuth2Config.ClientID)
@@ -695,14 +704,14 @@ func sshsignHandler(w http.ResponseWriter, r *http.Request, ca CaConfig, returnT
 		return
 	}
 	intro := time.Since(start2)
-	i := slices.IndexFunc(resources, func(r resource) bool { return r.Resource == params.Resource })
+	i := slices.IndexFunc(resources, func(r Resource) bool { return r.Resource == params.Resource })
 	if i < 0 { // no resources from getUserIfo -> no access
 		err = fmt.Errorf("unknown resource %s", params.Resource)
 		return
 	}
 	res := resources[i]
 
-	ci := certInfo{ca: ca.Id, claims: claims, resources: []resource{res}}
+	ci := certInfo{ca: ca.Id, claims: claims, resources: []Resource{res}}
 	sshCertificate, err := newCertificate(ca, publicKey, ci)
 	if err != nil {
 		return err
@@ -891,7 +900,7 @@ func handleSSHConnection(nConn net.Conn, sshConfig *ssh.ServerConfig) {
 							sshExit(channel, "", 77)
 							return
 						}
-						ci.resources = []resource{ci.resources[*resourceIndex]}
+						ci.resources = []Resource{ci.resources[*resourceIndex]}
 					}
 					ca := Config.CaConfigs[ci.ca]
 					cert, err := newCertificate(ca, publicKey, ci)
@@ -994,9 +1003,6 @@ func newCertificate(ca CaConfig, pubkey ssh.PublicKey, ci certInfo) (cert *ssh.C
 		// arams.Permissions.Extensions["ssh-domain-grant@core.aai.geant.org"+res] = "" //`["` + res + `"]` // experiment with data as key - lets ssh-keyget -L -f - show it as text
 		params.Permissions.Extensions["ssh-domain-grant@core.aai.geant.org"] = string(res)
 	}
-	if username := usernameFromPrincipal(ci.claims["principal"][0], ca); username != "" {
-		ci.claims["principal"] = append(ci.claims["principal"], username)
-	}
 	now := time.Now().In(time.FixedZone("UTC", 0)).Unix()
 	cert = &ssh.Certificate{
 		CertType:        ssh.UserCert,
@@ -1004,7 +1010,7 @@ func newCertificate(ca CaConfig, pubkey ssh.PublicKey, ci certInfo) (cert *ssh.C
 		Key:             pubkey,
 		Permissions:     params.Permissions,
 		KeyId:           ci.claims["principal"][0],
-		ValidPrincipals: ci.claims["principal"],
+		ValidPrincipals: usernameFromPrincipal(ca, ci),
 		ValidAfter:      uint64(now - 60),
 		ValidBefore:     uint64(now + params.Ttl),
 	}
@@ -1012,15 +1018,18 @@ func newCertificate(ca CaConfig, pubkey ssh.PublicKey, ci certInfo) (cert *ssh.C
 	return
 }
 
-func usernameFromPrincipal(principal string, ca CaConfig) (username string) {
+func usernameFromPrincipal(ca CaConfig, ci certInfo) (usernames []string) {
+    principal := ci.claims["principal"][0]
+    usernames = []string{principal}
 	if ca.HashedPrincipal {
 		hashed := sha256.Sum256([]byte(principal))
-		username = strings.TrimLeft(base64.RawURLEncoding.EncodeToString(hashed[:24]), "-") // - (dash) not allowed as 1st character
-		return
+		usernames = append(usernames, strings.TrimLeft(base64.RawURLEncoding.EncodeToString(hashed[:24]), "-")) // - (dash) not allowed as 1st character
 	}
 	if ca.MyAccessID {
-		username = strings.ReplaceAll(principal[:36], "-", "")
-		return
+		usernames = append(usernames, strings.ReplaceAll(principal[:36], "-", ""))
+	}
+	if ca.Resources[ci.resources[0].Resource].PosixPrincipal {
+        usernames = append(usernames, ci.resources[0].Uid)
 	}
 	return
 }
@@ -1127,10 +1136,6 @@ const (
 )
 
 type (
-	resource struct {
-		Resource, Uid string
-	}
-
 	certInfo struct {
 		ca        string
 		idp       string
@@ -1138,7 +1143,7 @@ type (
 		pwparam   string
 		verifier  string
 		claims    Claims
-		resources []resource
+		resources []Resource
 		cert      *ssh.Certificate
 		eol       time.Time
 		st        time.Time
@@ -1284,7 +1289,7 @@ func GetConfig(envJson []byte, pw string) (secrets secretsRec) {
 
 // EFP
 
-func getEFPResources(namespace string, values []string) (resources []resource) {
+func getEFPResources(namespace string, values []string) (resources []Resource) {
 	if namespace != "" {
 		for _, val := range values {
 			if tmp, ok := strings.CutPrefix(val, namespace); ok {
@@ -1295,7 +1300,7 @@ func getEFPResources(namespace string, values []string) (resources []resource) {
 							tmp2[i] = v
 						}
 					}
-					resources = append(resources, resource{Resource: tmp2[0], Uid: tmp2[1]})
+					resources = append(resources, Resource{Resource: tmp2[0], Uid: tmp2[1]})
 				}
 			}
 		}
