@@ -70,7 +70,7 @@ type (
 	CaConfig struct {
 		OK, Fake, Hide                               bool
 		SSOHost, Id, Name                            string
-		SSHTemplate, HTMLTemplate                    string
+		SSHTemplate, HTMLTemplate, SSHCmdTemplate    string
 		DefaultPrincipals, AuthnContextClassRef      []string
 		AllowedFlows                                 []Flow
 		HashedPrincipal                              bool
@@ -107,7 +107,7 @@ type (
 
 	Resource struct {
 		Resource, Uid string
-		DisplayName, SSHTemplate string
+		DisplayName, SSHCmdTemplate string
 		PosixPrincipal bool
 	}
 
@@ -909,12 +909,21 @@ func handleSSHConnection(nConn net.Conn, sshConfig *ssh.ServerConfig) {
 						log.Println("ssh", ca.Id, certTxt)
 						fmt.Fprintf(channel, "%s", certTxt)
 						xtralog.Info(certForLog(cert, ca, "ssh", srcAddr, ci.w, ci.i, time.Since(ci.st)))
-						// tmpl.ExecuteTemplate(channel.Stderr(), "SSHcmdtemplate", map[string]string{"Port": Config.SshPort, "Resource": resources[0], "Uid": posixUsernames[0]})
+						resource := ci.resources[0]
+						uid := resource.Uid
+						r := strings.NewReplacer("$CA", ci.ca, "$PORT", "22", "$RESOURCE", resource.Resource, "$UID",  uid)
+						sshcmd := ca.Resources[resource.Resource].SSHCmdTemplate
+						if sshcmd == "" {
+						    sshcmd = ca.SSHCmdTemplate
+						}
+	                    sshcmd = r.Replace(sshcmd)
 						ci.cert = cert
 						claimsStore.set(token, ci) // for feedback to browser
+		        		sshExit(channel, fmt.Sprintf("%s\n\n%s\n", certPP(cert), sshcmd), 0)
+				        return
 					}
 				}
-				sshExit(channel, "", 0)
+				sshExit(channel, "unknown token", 69)
 				return
 			case "shell":
 				sshExit(channel, "", 69)
@@ -925,7 +934,7 @@ func handleSSHConnection(nConn net.Conn, sshConfig *ssh.ServerConfig) {
 }
 
 func sshExit(ch ssh.Channel, err string, code uint32) {
-	if code != 0 {
+	if err != "" {
 		fmt.Fprintln(ch.Stderr(), err)
 	}
 	ch.SendRequest("exit-status", false, ssh.Marshal(&exitStatusMsg{Status: code}))
