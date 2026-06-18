@@ -131,6 +131,30 @@ type (
 		ClientSecrets           map[string]string
 		IntroSpectClientSecrets map[string]string
 	}
+
+	certInfo struct {
+		ca        string
+		idp       string
+		pw        string
+		pwparam   string
+		verifier  string
+		claims    Claims
+		resources []Resource
+		cert      *ssh.Certificate
+		eol       time.Time
+		st        time.Time
+		w, i, s   time.Duration
+	}
+
+	feedbackToken struct {
+		token string
+		eol   time.Time
+	}
+
+	rendezvous struct {
+		info sync.Map
+		ttl  time.Duration
+	}
 )
 
 const (
@@ -138,6 +162,12 @@ const (
 	WEBFLOW
 	DOSSH
 	DOJSON
+)
+
+const (
+	principal = iota
+	certificate
+	principalAndPassword
 )
 
 var (
@@ -823,6 +853,7 @@ func handleSSHConnection(nConn net.Conn, sshConfig *ssh.ServerConfig) {
 		return
 	}
 	defer conn.Close()
+	defer conn.Wait()
 
 	xtras := conn.Permissions.Extensions
 	publicKey, _ := ssh.ParsePublicKey([]byte(xtras["pubkey"]))
@@ -1137,38 +1168,6 @@ func PP(i ...any) {
 }
 
 // rendezvous
-
-const (
-	principal = iota
-	certificate
-	principalAndPassword
-)
-
-type (
-	certInfo struct {
-		ca        string
-		idp       string
-		pw        string
-		pwparam   string
-		verifier  string
-		claims    Claims
-		resources []Resource
-		cert      *ssh.Certificate
-		eol       time.Time
-		st        time.Time
-		w, i, s   time.Duration
-	}
-
-	feedbackToken struct {
-		token string
-		eol   time.Time
-	}
-
-	rendezvous struct {
-		info sync.Map
-		ttl  time.Duration
-	}
-)
 
 func (rv *rendezvous) cleanUp() {
 	ticker := time.NewTicker(rendevouzTTL)
