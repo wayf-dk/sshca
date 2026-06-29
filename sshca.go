@@ -926,6 +926,7 @@ func handleSSHConnection(nConn net.Conn, sshConfig *ssh.ServerConfig) {
 				}
 				ci, ok := claimsStore.wait(token, principal)
 				if ok && user != "" && ci.cert == nil {
+				    caRec := Config.CaConfigs[ci.ca]
 					if len(ci.resources) > 0 {
 						if *resourceIndex >= len(ci.resources) {
 							sshExit(channel, "", 77)
@@ -933,28 +934,33 @@ func handleSSHConnection(nConn net.Conn, sshConfig *ssh.ServerConfig) {
 						}
 						ci.resources = []Resource{ci.resources[*resourceIndex]}
 					}
-					ca := Config.CaConfigs[ci.ca]
-					cert, err := newCertificate(ca, publicKey, ci)
+					cert, err := newCertificate(caRec, publicKey, ci)
 					if err == nil {
 						certTxt := string(ssh.MarshalAuthorizedKey(cert))
-						log.Println("ssh", ca.Id, certTxt)
+						log.Println("ssh", caRec.Id, certTxt)
 						fmt.Fprintf(channel, "%s", certTxt)
-						xtralog.Info(certForLog(cert, ca, "ssh", srcAddr, ci.w, ci.i, time.Since(ci.st)))
-						resource := ci.resources[0]
-						uid := resource.Uid
-						r := strings.NewReplacer("$CA", ci.ca, "$PORT", "22", "$RESOURCE", resource.Resource, "$UID",  uid)
-						sshcmd := ca.Resources[resource.Resource].SSHCmdTemplate
+						xtralog.Info(certForLog(cert, caRec, "ssh", srcAddr, ci.w, ci.i, time.Since(ci.st)))
+						resource := Resource{}
+						if len(ci.resources) > 0 {
+    						resource = ci.resources[0]
+    					}
+						r := strings.NewReplacer("$CA", ci.ca, "$PORT", "22", "$RESOURCE", resource.Resource, "$UID",  resource.Uid)
+						sshcmd := caRec.Resources[resource.Resource].SSHCmdTemplate
 						if sshcmd == "" {
-						    sshcmd = ca.SSHCmdTemplate
+						    sshcmd = caRec.SSHCmdTemplate
 						}
 	                    sshcmd = r.Replace(sshcmd)
 						ci.cert = cert
 						claimsStore.set(token, ci) // for feedback to browser
-		        		sshExit(channel, fmt.Sprintf("%s\n\n%s\n", certPP(cert), sshcmd), 0)
+                        msg := ""
+						if resource.Resource != "" {
+    						msg = fmt.Sprintf("Your certificate for SSH access to %s has been successfully generated.\nThis certificate is valid for %d hours.\nTo connect to %[1]s, you can now use:\n%[3]s\n", resource.Resource, caRec.CAParams.Ttl/3600, sshcmd)
+    		        	}
+   		        		sshExit(channel, msg, 0)
 				        return
 					}
 				}
-				sshExit(channel, "unknown token", 69)
+				sshExit(channel, "Incorrect token, see https://docs.my-eurohpc.eu/aai/ssh/ for full documentation on the EFP SSH CA", 69)
 				return
 			case "shell":
 				sshExit(channel, "", 69)
@@ -1068,7 +1074,7 @@ func usernameFromPrincipal(ca CaConfig, ci certInfo) (usernames []string) {
 	if ca.MyAccessID {
 		usernames = append(usernames, strings.ReplaceAll(principal[:36], "-", ""))
 	}
-	if ca.Resources[ci.resources[0].Resource].PosixPrincipal {
+	if ca.Resources != nil && ca.Resources[ci.resources[0].Resource].PosixPrincipal {
         usernames = append(usernames, ci.resources[0].Uid)
 	}
 	return
