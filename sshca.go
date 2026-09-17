@@ -59,7 +59,7 @@ type (
 	}
 
 	CAParams struct {
-		Ttl         int64
+		Ttl         time.Duration
 		Permissions ssh.Permissions
 	}
 
@@ -186,10 +186,11 @@ var (
 	}
 	ssoTTL, rendevouzTTL    time.Duration
 	ErrNoValidResourceFound = errors.New("You don't have permission for the requested Resource")
-	hostCertTTL, _          = time.ParseDuration("720h")
+	hostCertTTL, _          = time.ParseDuration("72h")
 	PublicKey               string
 	Signer                  ssh.Signer
 	xtralog                 *syslog.Writer
+	Wg                      sync.WaitGroup
 )
 
 func Sshca(commit string) {
@@ -213,10 +214,11 @@ func Sshca(commit string) {
 	}
 	fmt.Printf("ssh frontendport: %s on host: %s\n", Config.SshPort, hostName)
 	prepareCAs()
-	go sshserver()
+	Wg.Go(func() { Sshserver(Config.SshListenOn) })
 
 	http.HandleFunc("/favicon.ico", faviconHandler)
 	http.Handle("/", appHandler(sshcaRouter))
+	Wg.Go(func () {
 	if Config.UseRevProxy {
 		fmt.Println("Listening on port: " + Config.WebListenOn)
 		err := http.ListenAndServe(Config.WebListenOn, nil)
@@ -237,6 +239,7 @@ func Sshca(commit string) {
 			log.Println("sshca stopped gracefully")
 		}
 	}
+	})
 }
 
 func faviconHandler(w http.ResponseWriter, r *http.Request) {
