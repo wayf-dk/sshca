@@ -774,7 +774,7 @@ func sshsignHandler(w http.ResponseWriter, r *http.Request, ca CaConfig, returnT
 	return
 }
 
-func sshserver() {
+func Sshserver(address string) {
 	sshConfig := &ssh.ServerConfig{
 		Config: ssh.Config{
 			MACs: ssh.SupportedAlgorithms().MACs,
@@ -806,11 +806,11 @@ func sshserver() {
 
 	// Once a ServerConfig has been configured, connections can be
 	// accepted.
-	listener, err := net.Listen("tcp", Config.SshListenOn)
+	listener, err := net.Listen("tcp", address)
 	if err != nil {
 		log.Fatal("failed to listen for connection: ", err)
 	}
-	fmt.Println("ssh listening on " + Config.SshListenOn)
+	fmt.Println("ssh listening on " + address)
 
 	for {
 		nConn, err := listener.Accept()
