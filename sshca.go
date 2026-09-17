@@ -640,7 +640,7 @@ func ssoFinalize(w http.ResponseWriter, r *http.Request, token string, ci certIn
 			return
 		}
 		if ca.ResourcesMandatory && len(ci.resources) == 0 {
-			err = tmpl.ExecuteTemplate(w, ca.HTMLTemplate, map[string]any{"tmpl": "#err", "err": "You do not have any resource entitlements. Please contact helpdesk@my-eurohpc.eu for assistance."})
+			err = tmpl.ExecuteTemplate(w, ca.HTMLTemplate, map[string]any{"tmpl": "#err", "err": template.HTML(`You do not have any resource entitlements. For more information, see <a href="https://docs.my-eurohpc.eu/direct-ssh/#missing-resource-entitlements">missing-resource-entitlements.</a>`)})
 			return
 		}
 		feedbackToken := feedbacktokenStore.getFeedbackToken(token)
