@@ -879,12 +879,12 @@ func handleSSHConnection(nConn net.Conn, sshConfig *ssh.ServerConfig) {
 		for req := range reqs {
 			switch req.Type {
 			case "exec":
+				resourceIndex := -1
 				args := strings.Split(string(req.Payload[4:])+"  ", " ") // always at least 2 elements
 				f1 := flag.NewFlagSet("", flag.ContinueOnError)
 				ca := f1.String("ca", "", "")
 				idp := f1.String("idp", "", "")
 				pw := f1.String("pw", "", "")
-				resourceIndex := f1.Int("resource", 0, "resource index")
 				flag.CommandLine.SetOutput(channel)
 				f1.Usage = flag.PrintDefaults
 				if err := f1.Parse(args[1:]); err != nil {
@@ -922,7 +922,7 @@ func handleSSHConnection(nConn net.Conn, sshConfig *ssh.ServerConfig) {
 						return
 					}
 					if tmp[1] != "" {
-						*resourceIndex = int(tmp[1][0]) - int('A')
+						resourceIndex = int(tmp[1][0]) - int('A')
 					}
 				default:
 					sshExit(channel, "service unavailable", 69)
@@ -930,34 +930,33 @@ func handleSSHConnection(nConn net.Conn, sshConfig *ssh.ServerConfig) {
 				ci, ok := claimsStore.wait(token, principal)
 				if ok && user != "" && ci.cert == nil {
 				    caRec := Config.CaConfigs[ci.ca]
-					if len(ci.resources) > 0 {
-						if *resourceIndex >= len(ci.resources) {
+					if resourceIndex >= 0 && len(ci.resources) > 0 {
+						if resourceIndex >= len(ci.resources) {
 							sshExit(channel, "", 77)
 							return
 						}
-						ci.resources = []Resource{ci.resources[*resourceIndex]}
+						ci.resources = []Resource{ci.resources[resourceIndex]}
 					}
 					cert, err := newCertificate(caRec, publicKey, ci)
 					if err == nil {
+						ci.cert = cert
+						claimsStore.set(token, ci) // for feedback to browser
 						certTxt := string(ssh.MarshalAuthorizedKey(cert))
 						log.Println("ssh", caRec.Id, certTxt)
 						fmt.Fprintf(channel, "%s", certTxt)
 						xtralog.Info(certForLog(cert, caRec, "ssh", srcAddr, ci.w, ci.i, time.Since(ci.st)))
-						resource := Resource{}
-						if len(ci.resources) > 0 {
-    						resource = ci.resources[0]
-    					}
+						sshcmds := []string{}
+						for _, resource := range ci.resources {
 						r := strings.NewReplacer("$CA", ci.ca, "$PORT", "22", "$RESOURCE", resource.Resource, "$UID",  resource.Uid)
 						sshcmd := caRec.Resources[resource.Resource].SSHCmdTemplate
 						if sshcmd == "" {
 						    sshcmd = caRec.SSHCmdTemplate
 						}
-	                    sshcmd = r.Replace(sshcmd)
-						ci.cert = cert
-						claimsStore.set(token, ci) // for feedback to browser
-                        msg := ""
-						if resource.Resource != "" {
-    						msg = fmt.Sprintf("Your certificate for SSH access to %s has been successfully generated.\nThis certificate is valid for %d hours.\nTo connect to %[1]s, you can now use:\n%[3]s\n", resource.Resource, caRec.CAParams.Ttl/3600, sshcmd)
+							sshcmds = append(sshcmds, r.Replace(sshcmd))
+						}
+						msg := fmt.Sprintf("Your %s certificate for SSH access has been successfully generated.\nThe certificate is valid for %s.\n", caRec.Name, caRec.CAParams.Ttl)
+						if len(ci.resources) > 0 {
+							msg += fmt.Sprintf("You can use the command(s) below to connect:\n%s\n", strings.Join(sshcmds, "\n"))
     		        	}
    		        		sshExit(channel, msg, 0)
 				        return
@@ -1045,14 +1044,19 @@ func newCertificate(ca CaConfig, pubkey ssh.PublicKey, ci certInfo) (cert *ssh.C
 	if _, ok := pubkey.(*ssh.Certificate); ok {
 		pubkey = pubkey.(*ssh.Certificate).Key
 	}
+
+	resources := []string{}
+	for _, res := range ci.resources {
+		resources = append(resources, res.Resource)
+	}
 	params := ca.CAParams
 	if len(ci.resources) > 0 {
-		res, _ := json.Marshal([]string{ci.resources[0].Resource})
+		res, _ := json.Marshal(resources)
 		params.Permissions.Extensions = maps.Clone(params.Permissions.Extensions)
 		// arams.Permissions.Extensions["ssh-domain-grant@core.aai.geant.org"+res] = "" //`["` + res + `"]` // experiment with data as key - lets ssh-keyget -L -f - show it as text
 		params.Permissions.Extensions["ssh-domain-grant@core.aai.geant.org"] = string(res)
 	}
-	now := time.Now().In(time.FixedZone("UTC", 0)).Unix()
+	now := time.Now().In(time.FixedZone("UTC", 0))
 	cert = &ssh.Certificate{
 		CertType:        ssh.UserCert,
 		Serial:          uint64(time.Now().UnixNano()),
@@ -1060,8 +1064,8 @@ func newCertificate(ca CaConfig, pubkey ssh.PublicKey, ci certInfo) (cert *ssh.C
 		Permissions:     params.Permissions,
 		KeyId:           ci.claims["principal"][0],
 		ValidPrincipals: usernameFromPrincipal(ca, ci),
-		ValidAfter:      uint64(now - 60),
-		ValidBefore:     uint64(now + params.Ttl),
+		ValidAfter:      uint64(now.Add(time.Second * -60).Unix()),
+		ValidBefore:     uint64(now.Add(params.Ttl).Unix()),
 	}
 	err = cert.SignCert(rand.Reader, ca.Signer)
 	return
