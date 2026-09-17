@@ -987,9 +987,9 @@ func newHostSigner(signer ssh.Signer, keyId string, principals []string) (hostSi
 		CertType:        ssh.HostCert,
 		Key:             signer.PublicKey(),
 		KeyId:           keyId,
-		ValidPrincipals: principals,
+		ValidPrincipals: []string{}, //principals,
 		ValidAfter:      uint64(now - 60),
-		ValidBefore:     uint64(now) + uint64(hostCertTTL),
+		ValidBefore:     uint64(now) + uint64(hostCertTTL.Seconds()),
 	}
 	err = cert.SignCert(rand.Reader, signer)
 	return ssh.NewCertSigner(cert, signer)
