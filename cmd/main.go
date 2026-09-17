@@ -2,8 +2,8 @@ package main
 
 import (
 	_ "embed"
-	"os"
 	"github.com/wayf-dk/sshca"
+	"os"
 )
 
 var (
@@ -41,6 +41,7 @@ func main() {
 		},
 	}
     hostName, _ := os.Hostname()
-    sshca.Host2PortRec = map[string]string{hostName: "2221",}
+	sshca.Host2PortRec = map[string]string{hostName: "2221"}
 	sshca.Sshca("demo")
+	sshca.Wg.Wait()
 }
